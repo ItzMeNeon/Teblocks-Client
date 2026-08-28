@@ -20,6 +20,7 @@ local SCN={
     -- Events
     update=false,
     draw=false,
+    overDraw=false,
     mouseClick=false,
     touchClick=false,
     mouseDown=false,
@@ -31,11 +32,13 @@ local SCN={
     touchMove=false,
     keyDown=false,
     keyUp=false,
+    textInput=false,
     gamepadDown=false,
     gamepadUp=false,
     fileDropped=false,
     directoryDropped=false,
     resize=false,
+    textInput=false,
 }-- Scene datas, returned
 
 function SCN.add(name,scene)
@@ -79,6 +82,7 @@ function SCN.init(s)
     SCN.touchClick=S.touchClick
     SCN.keyDown=S.keyDown
     SCN.keyUp=S.keyUp
+    SCN.textInput=S.textInput
     SCN.gamepadDown=S.gamepadDown
     SCN.gamepadUp=S.gamepadUp
     SCN.fileDropped=S.fileDropped
@@ -86,6 +90,7 @@ function SCN.init(s)
     SCN.resize=S.resize
     SCN.update=S.update
     SCN.draw=S.draw
+    SCN.overDraw=S.overDraw
     if S.enter then
         S.enter()
     end

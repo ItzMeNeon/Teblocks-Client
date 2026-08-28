@@ -14,6 +14,8 @@ local textBox=NET.textBox
 local inputBox=NET.inputBox
 
 local playing
+local paused
+local abandonCount=0
 local lastUpstreamTime
 local upstreamProgress
 local noTouch,noKey=false,false
@@ -39,7 +41,7 @@ local function _gotoSetting()
 end
 local function _quit()
     if tryBack() then
-        NET.room_leave()
+        if not GAME.replaying then NET.room_leave() end
         GAME.playing=false
         SCN.back()
     end
@@ -62,6 +64,8 @@ local scene={}
 function scene.enter()
     noTouch=not SETTING.VKSwitch
     playing=false
+    paused=false
+    abandonCount=0
     lastUpstreamTime=0
     upstreamProgress=1
 
@@ -76,13 +80,28 @@ function scene.enter()
 end
 function scene.leave()
     TASK.unlock('netPlaying')
+    -- A ranked replay borrows the live net_game/netBattle machinery and replaces
+    -- the room state with a throwaway one. Restore the real (post-match) room if
+    -- we had one, otherwise clear it so ranked matchmaking isn't left pointing at
+    -- the replay's fake "Playing" room (which would block starting a new search).
+    if GAME.replaying then
+        if NET._replayRoomState~=nil then
+            NET.roomState=NET._replayRoomState
+        else
+            NET.roomState=nil
+        end
+        NET._replayRoomState=nil
+        NETPLY.clear()
+        GAME.replaySetup=false
+        GAME.replaying=false
+    end
 end
 
 scene.mouseDown=NULL
 function scene.mouseMove(x,y) NETPLY.mouseMove(x,y) end
 function scene.touchDown(x,y)
-    if not playing then NETPLY.mouseMove(x,y) return end
-    if NET.spectate or noTouch or not textBox.hide then return end
+    if not playing or GAME.replaying then NETPLY.mouseMove(x,y) return end
+    if NET.spectate or noTouch or not textBox.hide or paused then return end
 
     local t=VK.on(x,y)
     if t then
@@ -91,7 +110,7 @@ function scene.touchDown(x,y)
     end
 end
 function scene.touchUp(x,y)
-    if not playing or NET.spectate or noTouch or not textBox.hide then return end
+    if not playing or GAME.replaying or NET.spectate or noTouch or not textBox.hide then return end
     local n=VK.on(x,y)
     if n then
         PLAYERS[1]:releaseKey(n)
@@ -99,7 +118,7 @@ function scene.touchUp(x,y)
     end
 end
 function scene.touchMove()
-    if touchMoveLastFrame or not playing or noTouch then return end
+    if touchMoveLastFrame or not playing or noTouch or GAME.replaying then return end
     touchMoveLastFrame=true
 
     local L=tc.getTouches()
@@ -126,9 +145,29 @@ function scene.touchMove()
     end
 end
 function scene.keyDown(key,isRep)
+    if GAME.replaying and paused then
+        if key=='escape' then paused=false return end
+        if key=='q' then _quit() return end
+        return
+    end
     if key=='escape' then
-        if not inputBox.hide then
+        if GAME.replaying then
+            paused=not paused
+        elseif not inputBox.hide then
             _switchChat()
+        elseif NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked' and playing then
+            -- Require several ESC taps so a ranked match can't be abandoned by
+            -- accident. The third tap sends player_finish, which the server
+            -- treats as this player leaving the match and settles a win for the
+            -- opponent still in the game.
+            abandonCount=abandonCount+1
+            if abandonCount>=3 then
+                abandonCount=0
+                MES.new('warn',"Abandoning match — you forfeit the win")
+                NET.player_finish()
+            else
+                MES.new('warn',"Press ESC "..(3-abandonCount).." more time(s) to abandon this match")
+            end
         else
             _quit()
         end
@@ -184,7 +223,7 @@ function scene.keyDown(key,isRep)
         WIDGET.focus(inputBox)
         inputBox:keypress(key)
     elseif playing then
-        if NET.spectate or noKey or isRep then return end
+        if NET.spectate or noKey or isRep or GAME.replaying or paused then return end
         local k=KEY_MAP.keyboard[key]
         if k and k>0 then
             PLAYERS[1]:pressKey(k)
@@ -203,7 +242,7 @@ function scene.keyDown(key,isRep)
     end
 end
 function scene.keyUp(key)
-    if not playing or NET.spectate or noKey then return end
+    if not playing or NET.spectate or noKey or GAME.replaying then return end
     local k=KEY_MAP.keyboard[key]
     if k and k>0 then
         PLAYERS[1]:releaseKey(k)
@@ -214,7 +253,7 @@ function scene.gamepadDown(key)
     if key=='back' then
         scene.keyDown('escape')
     else
-        if not playing then return end
+        if not playing or GAME.replaying then return end
         local k=KEY_MAP.joystick[key]
         if k and k>0 then
             PLAYERS[1]:pressKey(k)
@@ -223,7 +262,7 @@ function scene.gamepadDown(key)
     end
 end
 function scene.gamepadUp(key)
-    if not playing then return end
+    if not playing or GAME.replaying then return end
     local k=KEY_MAP.joystick[key]
     if k and k>0 then
         PLAYERS[1]:releaseKey(k)
@@ -232,13 +271,14 @@ function scene.gamepadUp(key)
 end
 
 function scene.update(dt)
-    if WS.status('game')~='running' then
+    if not GAME.replaying and WS.status('game')~='running' then
         TASK.unlock('netPlaying')
         NET.ws_close()
         SCN.back()
         return
     end
     if playing then
+        if paused then return end
         if not TASK.getLock('netPlaying') then
             playing=false
             BG.set()
@@ -262,7 +302,7 @@ function scene.update(dt)
                 checkWarning(P1,dt)
 
                 -- Upload stream
-                if not NET.spectate and P1.frameRun-lastUpstreamTime>8 then
+                if not GAME.replaying and not NET.spectate and P1.frameRun-lastUpstreamTime>8 then
                     local stream
                     if not GAME.rep[upstreamProgress] then
                         ins(GAME.rep,P1.frameRun)
@@ -322,6 +362,25 @@ function scene.draw()
 
         -- Virtual keys
         VK.draw()
+
+        -- Board labels: mark which board is yours (shown in live net matches
+        -- and replays, mirroring the ranked replay presentation).
+        if GAME.net then
+            setFont(25)
+            for p=1,#PLAYERS do
+                local P=PLAYERS[p]
+                local isYou=P.uid==USER.uid
+                gc_setColor(isYou and COLOR.lY or COLOR.lR)
+                mStr(isYou and "YOU" or (P.username or "OPPONENT"), P.centerX, P.fieldY-72)
+            end
+        end
+
+        -- Replay banner.
+        if GAME.replaying then
+            setFont(40)
+            gc_setColor(COLOR.Z)
+            mStr("REPLAY",640,8)
+        end
 
         -- Add dark overlay if chat is open
         if not textBox.hide then
@@ -391,6 +450,21 @@ function scene.draw()
         gc_setColor(.3,.7,1,a^2)
         gc_print(CHAR.icon.pencil,430,10)
     end
+
+    -- Replay pause overlay
+    if paused then
+        gc_setColor(0,0,0,.5)
+        gc.rectangle('fill',0,0,1280,720)
+        setFont(60)
+        gc_setColor(COLOR.Z)
+        mStr("PAUSED",640,300)
+        setFont(25)
+        gc_setColor(COLOR.lY)
+        mStr("Press ESC to resume",640,370)
+        setFont(20)
+        gc_setColor(COLOR.lR)
+        mStr("Press Q to quit replay",640,405)
+    end
 end
 local function _hideF_ready() return not (textBox.hide) or playing or (NETPLY.map[USER.uid].playMode=='Spectator' or NETPLY.map[USER.uid].readyMode=='Ready') end
 local function _hideF_standby() return not (textBox.hide) or playing or not (NETPLY.map[USER.uid].playMode=='Spectator' or NETPLY.map[USER.uid].readyMode=='Ready') end
@@ -436,8 +510,8 @@ scene.widgetList={
 --  WIDGET.newKey{x=1175,y=460,w=50,font=40,fText=CHAR.zChan.           ,code=function() inputBox:addText(                      ) end,hideF=_hideF_hideChat},
     WIDGET.newKey{x=1240,y=460,w=50,font=40,fText=CHAR.zChan.none       ,code=function() inputBox:addText(CHAR.zChan.none       ) end,hideF=_hideF_hideChat},
 
-    WIDGET.newKey{name='chat',    x=390,y=45,w=60,fText="···",                code=_switchChat},
-    WIDGET.newKey{name='quit',    x=890,y=45,w=60,font=30,fText=CHAR.icon.cross_thick,code=_quit},
+    WIDGET.newKey{name='chat',    x=390,y=45,w=60,fText="···",                code=_switchChat,hideF=function() return GAME.replaying or (NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked') end},
+    WIDGET.newKey{name='quit',    x=890,y=45,w=60,font=30,fText=CHAR.icon.cross_thick,code=_quit,hideF=function() return GAME.replaying or (NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked') end},
 }
 
 return scene

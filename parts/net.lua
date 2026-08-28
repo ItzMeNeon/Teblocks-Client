@@ -25,6 +25,8 @@ local NET={
     spectate=false,-- If player is spectating
     seed=false,
 
+    rankedResult=false,-- Summary of the last ranked match for the results scene
+
     roomAllReady=false,
 
     onlineCount="0",
@@ -104,7 +106,13 @@ local function getMsg(request,timeout)
                 local body=JSON.decode(msg.body)
                 if body then
                     if tostring(body.code):sub(1,1)~='2' then
-                        parseError(body.message~=nil and body.message or msg)
+                        local errMsg = body.message
+                        if not errMsg and msg and msg.body then
+                            errMsg = tostring(msg.body)
+                        elseif not errMsg then
+                            errMsg = "HTTP "..tostring(msg and msg.code or "?")
+                        end
+                        parseError(errMsg)
                     end
                     return body
                 end
@@ -136,21 +144,25 @@ function NET.login(auto)
             local res=getMsg({
                 pool='login',
                 url=AUTHHOST,
-                path='/techmino/api/v1/auth/check',
+                path='/api/auth/check',
                 headers={["x-access-token"]=USER.aToken},
             },6.26)
 
-            if res and math.floor(res.code/100)==2 then
+            if res and res.code and math.floor(res.code/100)==2 then
                 USER.uid=res.data.playerId
                 if res.data.accessToken then
                     USER.aToken=res.data.accessToken
                 end
+                if res.data.username then
+                    USERS.updateUsername(USER.uid,res.data.username)
+                end
                 saveUser()
                 NET.ws_connect()
+                NET.getUserInfo(USER.uid)
                 if not auto then-- Quit login menu
                     SCN.pop()
                 end
-                SCN.go('net_menu')
+                SCN.go('lobby')
                 WAIT.interrupt()
                 return
             end
@@ -180,12 +192,19 @@ function NET.loginWithPassword(username,password)
             body={username=username,password=password},
         },6.26)
 
-        if res and math.floor(res.code/100)==2 and res.data and res.data.token then
+        if res and res.code and math.floor(res.code/100)==2 and res.data and res.data.token then
             USER.oToken=res.data.token
             USER.aToken=res.data.token
+            if res.data.playerId then
+                USER.uid=res.data.playerId
+                if res.data.username then
+                    USERS.updateUsername(USER.uid,res.data.username)
+                end
+            end
             saveUser()
             NET.ws_connect()
-            SCN.go('net_menu')
+            NET.getUserInfo(USER.uid)
+            SCN.go('lobby')
             WAIT.interrupt()
             return
         elseif res then
@@ -247,11 +266,18 @@ function NET.getUserInfo(uid)
         local res=getMsg({
             pool='getInfo',
             url=AUTHHOST,
-            path='/techmino/api/v1/player/info?playerId='..uid,
+            path='/api/player/info?playerId='..uid,
         },6.26)
 
         if res and res.code==200 and type(res.data)=='table' then
             USERS.updateUserData(res.data)
+            -- When this is our own profile, sync the competitive elo and rank
+            -- so the lobby/card reflect the values persisted on the server
+            -- (otherwise they reset to the defaults after a client restart).
+            if uid==USER.uid then
+                if type(res.data.elo)=='number' then STAT.elo=res.data.elo end
+                if type(res.data.globalRank)=='number' then STAT.globalRank=res.data.globalRank end
+            end
         end
     end)
 end
@@ -260,7 +286,7 @@ function NET.getAvatar(uid)
         local res=getMsg({
             pool='getInfo',
             url=AUTHHOST,
-            path='/techmino/api/v1/player/avatar?playerId='..uid,
+            path='/api/player/avatar?playerId='..uid,
         },6.26)
 
         if res and res.code==200 and type(res.data)=='string' then
@@ -286,7 +312,7 @@ function NET.launchNotice()
     TASK.new(function()
         local res=getMsg({
             pool='getNotice',
-            path='/techmino/api/v1/notice?language='..noticeLang[SETTING.locale]..'&lastCount=1',
+            path='/api/notice?language='..noticeLang[SETTING.locale]..'&lastCount=1',
         },6.26)
 
         if res and res.code==200 then
@@ -304,7 +330,7 @@ function NET.getNotice(count)
     TASK.new(function()
         local res=getMsg({
             pool='getNotice',
-            path='/techmino/api/v1/notice?language='..noticeLang[SETTING.locale]..'&lastCount='..(count or 5),
+            path='/api/notice?language='..noticeLang[SETTING.locale]..'&lastCount='..(count or 5),
         },6.26)
 
         if res and res.code==200 then
@@ -343,6 +369,14 @@ local actMap={
     online_playerJoin=      1313,
     online_playerLeave=     1314,
     player_updateElo=       1315,
+    global_chat=            1316,
+    match_join=             1400,
+    match_leave=            1401,
+    match_found=            1402,
+    match_start_ranked=      1403,
+    match_finish_ranked=     1404,
+    match_cancel=            1405,
+    match_uploadReplay=      1406,
     } for k,v in next,actMap do actMap[v]=k end
 
 local function wsSend(act,data)
@@ -365,7 +399,7 @@ local function _playerLeaveRoom(uid)
     for i=1,#PLY_ALIVE do if PLY_ALIVE[i].uid==uid then table.remove(PLY_ALIVE,i) break end end
     if uid==USER.uid then
         GAME.playing=false
-        SCN.backTo('net_menu')
+        SCN.backTo('lobby')
     else
         NETPLY.remove(uid)
     end
@@ -390,6 +424,16 @@ end
 -- Global
 function NET.global_getOnlineCount()
     wsSend(actMap.global_getOnlineCount)
+end
+
+-- Global
+function NET.global_chat(text)
+    if not TASK.lock('chatLimit',1.26) then
+        MES.new('warn',text.tooFrequent)
+    elseif #text>0 then
+        wsSend(actMap.global_chat,{message=text})
+        return true
+    end
 end
 
 -- Room
@@ -504,12 +548,251 @@ function NET.player_updateElo()
     wsSend(actMap.player_updateElo)
 end
 
+-- Ranked 1v1 matchmaking
+function NET.ranked_join()
+    if WS.status('game')=='dead' then NET.ws_connect() end
+    wsSend(actMap.match_join)
+end
+function NET.ranked_leave()
+    wsSend(actMap.match_leave)
+end
+
+-- Build the local player's .rep bytes (zlib-compressed metadata + recording)
+-- from the in-memory GAME.rep. Returns the raw bytes string, or false.
+local function _buildLocalRepBytes()
+    if not GAME.rep or #GAME.rep==0 then return false end
+    local metadata={
+        date=os.date("%Y/%m/%d %H:%M:%S"),
+        mode=GAME.curModeName,
+        version=VERSION.string,
+        player=USERS.getUsername(USER.uid),
+        -- Store the exact seed string (NET.seed) rather than the numeric
+        -- GAME.seed: a 64-bit match seed cannot survive JSON number round-trips
+        -- as a double, and a lossy seed would make the replay's piece sequence
+        -- diverge from the live match.
+        seed=NET.seed,
+        setting=GAME.setting,
+        mod={},
+        tasUsed=GAME.tasUsed,
+    }
+    local ok,content=pcall(love.data.compress,'string','zlib',
+        JSON.encode(metadata).."\n"..DATA.dumpRecording(GAME.rep))
+    if not ok or not content then return false end
+    return content
+end
+
+-- Upload the local player's replay for a finished ranked match. The server
+-- stores it under replays/<matchId>/<playerId>.rep so both participants' runs
+-- live in the same match folder. Fire-and-forget (best effort).
+function NET.uploadRankedReplay(matchId)
+    if not matchId or not USER.uid then return end
+    local content=_buildLocalRepBytes()
+    if not content then return end
+    TASK.new(function()
+        wsSend(actMap.match_uploadReplay,{
+            matchId=matchId,
+            playerId=USER.uid,
+            data=love.data.encode('string','base64',content),
+        })
+    end)
+end
+
+-- Save both players' replays locally (under replay/ranked_<matchId>_<uid>.rep)
+-- so they appear in the replay list and can be watched later. The local file
+-- is built from GAME.rep directly; the opponent's is fetched from the server.
+function NET.saveRankedReplays(matchId,oppId)
+    if not matchId or not USER.uid then return end
+    TASK.new(function()
+        local content=_buildLocalRepBytes()
+        if content then
+            love.filesystem.write(("replay/ranked_%s_%s.rep"):format(matchId,USER.uid),content)
+        end
+        if oppId then
+            local oppRaw=_fetchRankedReplayRaw(matchId,oppId)
+            if oppRaw then
+                love.filesystem.write(("replay/ranked_%s_%s.rep"):format(matchId,oppId),oppRaw)
+            end
+        end
+    end)
+end
+
+-- Fetch a stored ranked replay's raw bytes from the server. Returns the body
+-- string (zlib-compressed .rep) or false on failure/timeout.
+local function _fetchRankedReplayRaw(matchId,playerId)
+    HTTP{
+        pool='repDL',
+        url=AUTHHOST,
+        path=("/api/match/replay?matchId=%s&playerId=%s"):format(matchId,playerId),
+        headers={['x-access-token']=USER.oToken},
+    }
+    local totalTime=0
+    while true do
+        local msg=HTTP.pollMsg('repDL')
+        if msg then
+            if type(msg.body)=='string' and #msg.body>0 then
+                return msg.body
+            end
+            return false
+        else
+            totalTime=totalTime+coroutine.yield()
+            if totalTime>6.26 then return false end
+        end
+    end
+end
+
+-- Download both players' replays for a finished ranked match, save them
+-- locally (so they persist in the replay list), and play the match back as a
+-- combined 1v1 net replay. Both clients only record their own placements, so
+-- the combined replay needs both files to be complete; we wait/poll until the
+-- opponent's replay has finished uploading before playing, so we never watch a
+-- truncated/corrupt replay.
+function NET.watchRankedReplay()
+    local R=NET.rankedResult
+    if not R or not R.matchId or not R.oppId then
+        MES.new('error',"No replay available")
+        return
+    end
+    TASK.new(function()
+        local ok,err=pcall(function()
+            MES.new('info',"Waiting for replay...")
+            local myRaw,oppRaw
+            -- Poll until both replays are available (the opponent may still be
+            -- uploading their recording when the results screen appears).
+            local waited=0
+            while true do
+                myRaw=_fetchRankedReplayRaw(R.matchId,USER.uid)
+                oppRaw=_fetchRankedReplayRaw(R.matchId,R.oppId)
+                if myRaw and oppRaw then break end
+                waited=waited+coroutine.yield()
+                if waited>15.26 then
+                    MES.new('error',"Replay not ready yet")
+                    return
+                end
+            end
+            -- Persist both original replays locally.
+            love.filesystem.write(("replay/ranked_%s_%s.rep"):format(R.matchId,USER.uid),myRaw)
+            love.filesystem.write(("replay/ranked_%s_%s.rep"):format(R.matchId,R.oppId),oppRaw)
+
+            -- Register them in the replay list (if not already) so they can also
+            -- be watched later through the standard replay scene's buttons.
+            for _,uid in next,{USER.uid,R.oppId} do
+                local fn=("replay/ranked_%s_%s.rep"):format(R.matchId,uid)
+                local exists=false
+                for _,r in next,REPLAY do
+                    if r.fileName==fn then exists=true break end
+                end
+                if not exists then
+                    local rep=DATA.parseReplay(fn)
+                    if rep and rep.available then table.insert(REPLAY,1,rep) end
+                end
+            end
+
+            local myRep=DATA.parseReplayData("ranked",myRaw,true)
+            local oppRep=DATA.parseReplayData("ranked",oppRaw,true)
+            if not (myRep and myRep.available and oppRep and oppRep.available) then
+                MES.new('error',"Replay data corrupted")
+                return
+            end
+            NET.startRankedReplay(myRep,oppRep,USER.uid,R.oppId)
+        end)
+        if not ok then
+            MES.new('error',"Replay playback failed")
+            LOG("watchRankedReplay error: "..tostring(err))
+            LOG(debug.traceback())
+        end
+    end)
+end
+
+-- Start a combined 1v1 net replay: player 1 is driven by `myRep`'s recording
+-- and player 2 (remote) by `oppRep`'s recording, reusing the live net_game
+-- streaming path. Does not affect live matchmaking.
+function NET.startRankedReplay(myRep,oppRep,myUid,oppUid)
+    myUid=myUid or USER.uid
+    oppUid=oppUid or (NET.rankedResult and NET.rankedResult.oppId)
+    if not myUid or not oppUid then
+        MES.new('error',"Missing replay player info")
+        LOG("startRankedReplay: missing player uids")
+        return
+    end
+    if not MODES.netBattle then
+        MODES.netBattle=require('parts.modes.netBattle')
+        MODES.netBattle.name='netBattle'
+    end
+
+    GAME.net=true
+    GAME.replaying=true
+    GAME.replaySetup=true
+    GAME.fromRepMenu=false
+    GAME.init=false
+    GAME.seed=myRep.seed or oppRep.seed
+    GAME.setting=myRep.setting or GAME.setting
+    GAME.curModeName='netBattle'
+    GAME.curMode=MODES.netBattle
+    GAME.modeEnv=GAME.curMode.env
+    GAME.rep={}
+
+    NET.roomState={
+        info={name="Ranked Replay",type="ranked",version="",description=""},
+        data={},
+        count={Gamer=2,Spectator=0},
+        capacity=2,
+        private=true,
+        state="Playing",
+    }
+    -- Remember the real post-match room so we can restore it once the replay
+    -- ends, instead of leaving the fake replay room cached on the client
+    -- (which would otherwise keep the matchmaking state polluted).
+    NET._replayRoomState=NET.roomState
+    NETPLY.clear()
+    -- Feed each side its own match settings as the config so the remote-env
+    -- loader has a real (non-empty) config. An empty string makes
+    -- _loadRemoteEnv emit a "Bad conf" warning (and the ZFramework error
+    -- collector then dumps the loadremoteenv/newRemotePlayer/resetGameData
+    -- stack) even though this is just a local replay with no live opponent.
+    NETPLY.add{uid=myUid,  group=0,role='Admin', playMode='Gamer',readyMode='Playing',config=JSON.encode(myRep.setting or {})}
+    NETPLY.add{uid=oppUid,group=0,role='Normal',playMode='Gamer',readyMode='Playing',config=JSON.encode(oppRep.setting or {})}
+
+    NET.seed=GAME.seed
+    -- This is a local replay, not a live room: suppress the chat box/overlay
+    -- and the networking-only widgets so the replay doesn't look or behave
+    -- like an active net session.
+    NET.textBox.hide=true
+    NET.inputBox.hide=true
+    TASK.lock('netPlaying')
+    SCN.go('net_game','fade')
+
+    -- After net_game builds the players, feed both recordings as streams.
+    TASK.new(function()
+        while #PLAYERS<2 do coroutine.yield() end
+        local myList={}  DATA.pumpRecording(myRep.data,myList)
+        local oppList={} DATA.pumpRecording(oppRep.data,oppList)
+        GAME.rep=myList
+        GAME.replaying=true
+        GAME.replaySetup=false
+        GAME.recording=false
+        -- Stream sids are mapped onto this replay's canonical NET.uid_sid values
+        -- in netBattle.load (same as live net play), so attacks route correctly.
+        PLAYERS[1]:startStreaming(myList)
+        PLAYERS[2]:startStreaming(oppList)
+    end)
+end
+
 
 
 -- WS
 NET.wsCallBack={}
 function NET.wsCallBack.global_getOnlineCount(body)
     NET.onlineCount=tonumber(body.data) or "_"
+end
+function NET.wsCallBack.global_chat(body)
+    local name=USERS.getUsername(body.data.playerId)
+    if not name or #name==0 then
+        name=tostring(body.data.playerId)
+    end
+    local msg=body.data.message
+    if CHAT and CHAT.receiveMessage then
+        CHAT.receiveMessage(name,msg)
+    end
 end
 function NET.wsCallBack.room_chat(body)
     if SCN.cur~='net_game' then return end
@@ -702,6 +985,12 @@ function NET.wsCallBack.player_updateElo(body)
 end
 function NET.wsCallBack.match_finish()
     if SCN.cur~='net_game' then return end
+    -- Ranked matches are finalized by match_finish_ranked, which keeps the
+    -- game on screen until the finish animation completes and then drives the
+    -- transition to the results screen. Skip the casual waiting-room flow here
+    -- so netPlaying is not unlocked early (which would briefly flash the
+    -- net_game waiting room before the results scene).
+    if NET.roomState.info and NET.roomState.info.type=='ranked' then return end
     for _,P in next,PLAYERS do
         NETPLY.setStat(P.uid,P.stat)
     end
@@ -713,13 +1002,91 @@ end
 function NET.wsCallBack.match_ready()-- not used
 end
 function NET.wsCallBack.match_start(body)
-    if SCN.cur~='net_game' then return end
+    -- Note: we must set the lock/seed even if the scene hasn't finished
+    -- transitioning into net_game yet. The server sends room_enter (1306) and
+    -- match_start (1102) back-to-back, and the scene switch is applied at the
+    -- frame boundary, so a SCN.cur guard here would drop the lock and the
+    -- match would never start. net_game.update only consumes the lock once it
+    -- is actually the active scene, so this is safe.
     TASK.lock('netPlaying')
     NET.seed=body.data and body.data.seed
     if not NET.seed then
         NET.seed=0
         MES.new("error",'No seed received')
     end
+end
+function NET.wsCallBack.match_found(body)
+    -- A ranked match was found. The server follows this with a room_enter
+    -- (1306) snapshot so the client enters net_game and uses the standard
+    -- ready/stream/finish flow, then match_start_ranked (1403).
+    MES.new('info',"Match found!")
+end
+function NET.wsCallBack.match_start_ranked(body)
+    -- Same as match_start: set the lock/seed unconditionally (see note there)
+    -- so the match starts even if the net_game scene switch is still pending.
+    TASK.lock('netPlaying')
+    NET.seed=body.data and body.data.seed
+    if not NET.seed then
+        NET.seed=0
+        MES.new("error",'No seed received')
+    end
+end
+function NET.wsCallBack.match_finish_ranked(body)
+    if SCN.cur~='net_game' then return end
+    for _,P in next,PLAYERS do
+        NETPLY.setStat(P.uid,P.stat)
+    end
+    if body.data then
+        local d=body.data
+        local matchId=type(d.matchId)=='string' and d.matchId or false
+        local myDelta=type(d.ratingChange)=='number' and d.ratingChange or 0
+        local myNew=type(d.ratingAfter)=='number' and d.ratingAfter or (STAT.elo or 1200)
+        local myOld=myNew-myDelta
+        if type(d.globalRank)=='number' then STAT.globalRank=d.globalRank end
+        STAT.elo=myNew
+
+        local opp=d.opponent or {}
+        local oppId=type(opp.playerId)=='string' and opp.playerId or false
+        local oppDelta=type(opp.ratingChange)=='number' and opp.ratingChange or 0
+        local oppNew=type(opp.ratingAfter)=='number' and opp.ratingAfter or 0
+        local oppOld=oppNew-oppDelta
+
+        -- Cache the opponent's profile so their name shows on the results
+        -- screen even if we never fetched it during the match.
+        if oppId then NET.getUserInfo(oppId) end
+
+        -- Stash the summary now so the results scene has it ready.
+        NET.rankedResult={
+            matchId=matchId,
+            winnerId=type(d.winnerId)=='string' and d.winnerId or USER.uid,
+            myOld=myOld, myNew=myNew, myDelta=myDelta, myRank=STAT.globalRank,
+            oppId=oppId, oppOld=oppOld, oppNew=oppNew, oppDelta=oppDelta, oppRank=type(opp.globalRank)=='number' and opp.globalRank or 0,
+        }
+
+        -- Best-effort: upload this player's replay into the match folder.
+        if matchId then NET.uploadRankedReplay(matchId) end
+    end
+    -- Let the finish animation (e.g. the opponent's top-out) play out before
+    -- showing results. Keep netPlaying locked so net_game does not briefly drop
+    -- to the waiting room, and only then transition. net_game.leave() will
+    -- unlock netPlaying when the results scene takes over.
+    -- Disband the live room on finish so the client isn't left sitting in a
+    -- stale room that blocks starting a new ranked search.
+    TASK.new(function()
+        TEST.yieldT(2.6)
+        if SCN.cur=='net_game' then
+            NET.roomState=nil
+            NETPLY.clear()
+            SCN.go('net_rankedResult','fade')
+        end
+    end)
+end
+function NET.wsCallBack.match_cancel()
+    -- Opponent left the queue before a match was formed.
+    if SCN.cur~='net_ranked' then return end
+    matchmaking=false
+    searchTimer=0
+    MES.new('info',"Matchmaking cancelled")
 end
 
 function NET.ws_connect()
@@ -751,14 +1118,17 @@ function NET.ws_update()
     do-- Get UID
         local res=getMsg({
             pool='getUID',
-            path='/techmino/api/v1/auth/check',
+            path='/api/auth/check',
             headers={["x-access-token"]=USER.oToken},
         },6.26)
 
-        if res and math.floor(res.code/100)==2 then
+        if res and res.code and math.floor(res.code/100)==2 then
             USER.uid=res.data.playerId
             if res.data.accessToken then
                 USER.oToken=res.data.accessToken
+            end
+            if res.data.username then
+                USERS.updateUsername(USER.uid,res.data.username)
             end
             saveUser()
         else
@@ -771,6 +1141,8 @@ function NET.ws_update()
 
     -- Initialize player setting
     NET.player_updateConf()
+    -- Sync our competitive elo/rank from the server (persists across restarts).
+    NET.getUserInfo(USER.uid)
 
     -- Websocket main loop
     local updateOnlineCD=0
