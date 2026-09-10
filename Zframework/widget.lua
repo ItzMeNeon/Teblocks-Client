@@ -737,7 +737,7 @@ function selector:reset()
     for i=1,#L do
         if L[i]==V then
             self.select=i
-            self.selText=self.list[i]
+            self.selText=tostring(self.list[i])
             return
         end
     end
@@ -801,7 +801,7 @@ function selector:draw()
     gc_draw(self.obj,x+w*.5,y-4,nil,min((w-20)/self.obj:getWidth(),1),1,self.obj:getWidth()*.5,0)
     gc_setColor(1,1,1)
     FONT.set(30)
-    mStr(self.selText,x+w*.5,y+22)
+    mStr(self.selText or "",x+w*.5,y+22)
 end
 function selector:getInfo()
     return("x=%d,y=%d,w=%d"):format(self.x+self.w*.5,self.y+30,self.w)
@@ -823,7 +823,7 @@ function selector:press(x)
         if self.select~=s then
             self.code(self.list[s],s)
             self.select=s
-            self.selText=self.list[s]
+            self.selText=tostring(self.list[s])
             if self.sound then
                 SFX.play('selector')
             end
@@ -843,7 +843,7 @@ function selector:scroll(n)
     end
     self.code(self.list[s])
     self.select=s
-    self.selText=self.list[s]
+    self.selText=tostring(self.list[s])
     if self.sound then
         SFX.play('selector')
     end
@@ -1365,6 +1365,8 @@ WIDGET.active={}-- Table contains all active widgets
 WIDGET.scrollHeight=0-- Max drag height, not actual container height!
 WIDGET.scrollPos=0-- Current scroll position
 WIDGET.sel=false-- Selected widget
+WIDGET.locked=false-- Hard lock: when true no widget receives mouse/touch input (e.g. modal dialogs)
+WIDGET.blockZone=nil-- Soft block: function(x,y)->bool, true disables widgets under overlapping overlays (e.g. side panels)
 WIDGET.indexMeta={
     __index=function(L,k)
         for i=1,#L do
@@ -1376,6 +1378,8 @@ WIDGET.indexMeta={
 }
 function WIDGET.setWidgetList(list)
     WIDGET.unFocus(true)
+    WIDGET.locked=false
+    WIDGET.blockZone=nil
     WIDGET.active=list or NONE
     WIDGET.cursorMove(xOy:inverseTransformPoint(love.mouse.getPosition()))
 
@@ -1444,7 +1448,16 @@ function WIDGET.unFocus(force)
     end
 end
 
+local function _blocked(x,y)
+    if WIDGET.locked then return true end
+    if WIDGET.blockZone and WIDGET.blockZone(x,y) then return true end
+    return false
+end
 function WIDGET.cursorMove(x,y)
+    if _blocked(x,y) then
+        if WIDGET.sel and not WIDGET.sel.keepFocus then WIDGET.unFocus() end
+        return
+    end
     for _,W in next,WIDGET.active do
         if not W.hide and W.resCtr and W:isAbove(x,y+WIDGET.scrollPos) then
             WIDGET.focus(W)
@@ -1456,6 +1469,7 @@ function WIDGET.cursorMove(x,y)
     end
 end
 function WIDGET.press(x,y,k)
+    if _blocked(x,y) then return end
     local W=WIDGET.sel
     if W then
         if W.press then
@@ -1465,6 +1479,7 @@ function WIDGET.press(x,y,k)
     end
 end
 function WIDGET.drag(x,y,dx,dy)
+    if _blocked(x,y) then return end
     if WIDGET.sel then
         local W=WIDGET.sel
         if W.drag then
@@ -1475,6 +1490,7 @@ function WIDGET.drag(x,y,dx,dy)
     end
 end
 function WIDGET.release(x,y,k)
+    if _blocked(x,y) then return end
     local W=WIDGET.sel
     if W and W.release then
         W:release(x,y+WIDGET.scrollPos,k)

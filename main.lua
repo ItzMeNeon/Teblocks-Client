@@ -29,8 +29,20 @@ DAILYLAUNCH=false
 -- Launch flags (parsed manually: TABLE is loaded later via Zframework)
 do
     local _temp=false
-    for _,v in ipairs(arg) do if v=='--temp' then _temp=true break end end
+    local _dumpState=false
+    local _dumpPrefix=nil
+    local _dumpInterval=nil
+    for i,v in ipairs(arg) do
+        if v=='--temp' then _temp=true
+        elseif v=='--dump-state' then _dumpState=true
+        elseif v:sub(1,13)=='--dump-prefix' then _dumpPrefix=v:sub(15)
+        elseif v:sub(1,15)=='--dump-interval' then _dumpInterval=tonumber(v:sub(17))
+        end
+    end
     TEMP_MODE=_temp
+    DUMP_STATE=_dumpState
+    DUMP_STATE_PREFIX=_dumpPrefix
+    DUMP_STATE_INTERVAL=_dumpInterval
 end
 
 -- System setting
@@ -119,6 +131,8 @@ VK     =require'parts.virtualKey'
 BOT    =require'parts.bot'
 RSlist =require'parts.RSlist'; DSCP=RSlist.TRS.centerPos
 PLY    =require'parts.player'
+SNAPSHOT=require'parts.player.snapshot'
+ROLLBACK=require'parts.player.rollback'
 NETPLY =require'parts.netPlayer'
 MODES  =require'parts.modes'
 
@@ -340,6 +354,8 @@ SKIN.load{
     {name="Coloredbone (MrZ)",              path='media/image/skin/mrz/coloredbone.png'},
     {name="WTF (MrZ)",                      path='media/image/skin/mrz/wtf.png'},
 }
+
+SKIN.loadUser('skins')
 
 -- Initialize sound libs
 SFX.init((function() --[Warning] Not loading files here, just get the list of sound needed
@@ -620,10 +636,10 @@ for _,fileName in next,fs.getDirectoryItems('replay') do
 end
 table.sort(REPLAY,function(a,b) return a.fileName>b.fileName end)
 
-AUTHURL="http://localhost:8080"
-AUTHHOST="localhost:8080"
-WS.switchHost('localhost','8080','/api/ws')
-HTTP.setHost("localhost:8080")
+AUTHURL="https://backend.teblocks.my.id"
+AUTHHOST="backend.teblocks.my.id"
+WS.switchHost('backend.teblocks.my.id','80','/api/ws')
+HTTP.setHost("backend.teblocks.my.id")
 HTTP.setThreadCount(1)
 
 -- Discord RPC

@@ -61,6 +61,7 @@ local AISpeed={60,50,42,34,27,21,16,12,9,6}
     }
 ]]
 function BOT.template(arg)
+    if type(arg)~='table' then return end
     if arg.type=='CC' then
         return {
             type='CC',
@@ -76,6 +77,12 @@ function BOT.template(arg)
             type='9S',
             delay=math.floor(AISpeed[arg.speedLV]),
             hold=arg.hold,
+        }
+    elseif arg.type=='ServerDriven' then
+        return {
+            type='ServerDriven',
+            delay=math.huge,
+            hold=false,
         }
     end
 end
@@ -127,6 +134,23 @@ function BOT.new(P,data)
         end
         bot.runningThread=coroutine.wrap(cc_lua.thread)
         bot.runningThread(bot)
+    elseif data.type=="ServerDriven" then
+        -- The server streams inputs via the 1106 bot_frame action
+        -- (parts/net.lua NET.wsCallBack.bot_frame). No local AI runs;
+        -- Player:pressKey/releaseKey is called directly by the
+        -- 1106 handler so the rendered piece mirrors the server's
+        -- authoritative sim. The stub thread just yields forever so
+        -- baseBot.update's pcall(bot.runningThread) at init.lua:19
+        -- is harmless.
+        TABLE.cover(baseBot,bot)
+        TABLE.cover(require"parts.bot.server_driven",bot)
+        P:setRS('TRS')
+        bot.keys={}
+        bot.delay=data.delay or math.huge
+        bot.delay0=bot.delay
+        bot.runningThread=coroutine.wrap(bot.thread)
+        bot.runningThread(bot)
+        setmetatable(bot,botMeta)
     else-- if data.type=="9S" then-- 9s or else
         TABLE.cover(baseBot,bot)
         TABLE.cover(require"parts.bot.bot_9s",bot)

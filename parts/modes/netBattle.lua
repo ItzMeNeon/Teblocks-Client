@@ -24,8 +24,10 @@ return {
         for i=#L,1,-1 do
             table.insert(NETPLY.list,table.remove(NETPLY.list,math.random(i)))
         end
-        TABLE.clear(NET.uid_sid)
-        for i=1,#L do NET.uid_sid[L[i].uid]=i end
+        if #L>0 then
+            TABLE.clear(NET.uid_sid)
+            for i=1,#L do NET.uid_sid[L[i].uid]=i end
+        end
 
         local N=1
         for i,p in next,L do
@@ -38,6 +40,7 @@ return {
                 break
             end
         end
+    -- Iterate NETPLY for real players only.
     for _,p in next,L do
         if p.playMode=='Gamer' then
             PLY.newRemotePlayer(N,false,p)

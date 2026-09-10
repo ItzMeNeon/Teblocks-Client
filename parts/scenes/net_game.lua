@@ -9,6 +9,7 @@ local ins=table.insert
 
 local SCR,VK,NET,NETPLY=SCR,VK,NET,NETPLY
 local PLAYERS,GAME=PLAYERS,GAME
+local ROLLBACK=ROLLBACK
 
 local textBox=NET.textBox
 local inputBox=NET.inputBox
@@ -18,6 +19,7 @@ local paused
 local abandonCount=0
 local lastUpstreamTime
 local upstreamProgress
+
 local noTouch,noKey=false,false
 local touchMoveLastFrame=false
 
@@ -34,6 +36,19 @@ local function _replayFinished()
         end
     end
     return true
+end
+
+-- _stepPlayers runs the per-player fixed-step update loop. When the rollback
+-- netcode layer is enabled (NET._rollbackEnabled), it delegates to
+-- ROLLBACK.step which adds snapshotting and server reconciliation around the
+-- same Player:update calls. Default off — visible behavior is identical to
+-- the legacy loop until the integration test (slice 4) flips the flag.
+local function _stepPlayers(dt)
+    if NET._rollbackEnabled and ROLLBACK then
+        ROLLBACK.step(PLAYERS, dt)
+    else
+        for p=1,#PLAYERS do PLAYERS[p]:update(dt) end
+    end
 end
 local function _replaySeekTo(frame)
     if frame<NET._replayCur then
@@ -73,7 +88,7 @@ local function _replayUpdate(dt)
         -- spreads across a few frames instead of freezing the client.
         local cap=400
         while NET._replayFF and cap>0 do
-            for p=1,#PLAYERS do PLAYERS[p]:update(dt) end
+            _stepPlayers(dt)
             cap=cap-1
             if _replayFinished() or (NET._replayFFTarget>0 and PLAYERS[1].frameRun>=NET._replayFFTarget) then
                 NET._replayFF=false
@@ -83,7 +98,7 @@ local function _replayUpdate(dt)
     elseif not paused then
         local steps=GAME.replaySpeed or 1
         for s=1,steps do
-            for p=1,#PLAYERS do PLAYERS[p]:update(dt) end
+            _stepPlayers(dt)
             if _replayFinished() then break end
         end
     end
@@ -244,6 +259,11 @@ function scene.keyDown(key,isRep)
     if key=='escape' then
         if GAME.replaying then
             paused=not paused
+        elseif NET.matchFoundPending and NET.matchFoundCountdown>0 then
+            NET.matchFoundPending=false
+            NET.matchFoundCountdown=0
+            NET.matchFoundSeed=nil
+            NET.ranked_leave()
         elseif not inputBox.hide then
             _switchChat()
         elseif NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked' and playing then
@@ -388,7 +408,7 @@ function scene.update(dt)
                 if GAME.replaying then
                     _replayUpdate(dt)
                 else
-                    for p=1,#PLAYERS do PLAYERS[p]:update(dt) end
+                    _stepPlayers(dt)
                 end
 
                 local P1=PLAYERS[1]
@@ -410,12 +430,19 @@ function scene.update(dt)
                         stream=stream.."\0\0\0\0"
                     end
                     NET.player_stream(stream)
+                    -- Flush any queued authoritative-sim inputs (1413) at the
+                    -- same cadence as the legacy stream upload. No-op when
+                    -- not in a ranked room (NET._inputSubmitBuf stays empty).
+                    NET.flushInputs()
                     lastUpstreamTime=PLAYERS[1].alive and P1.frameRun or 1e99
                 end
             end
         end
     else
         if not TASK.getLock('netPlaying') then
+            if NET.matchFoundPending and NET.matchFoundCountdown>0 then
+                NET.updateMatchFoundCountdown(dt)
+            end
             NETPLY.update(dt)
         else
             playing=true
@@ -464,9 +491,14 @@ function scene.draw()
             setFont(GAME.replaying and 18 or 25)
             for p=1,#PLAYERS do
                 local P=PLAYERS[p]
-                local isYou=P.uid==USER.uid
+                if not P then
+                    print(("[net_game] nil PLAYERS[%d] during draw"):format(p))
+                elseif not P.fieldY then
+                    print(("[net_game] unpositioned player id=%d uid=%s type=%s fieldY=%s centerX=%s"):format(P.id, tostring(P.uid), tostring(P.type), tostring(P.fieldY), tostring(P.centerX)))
+                end
+                local isYou=P and P.uid==USER.uid
                 gc_setColor(isYou and COLOR.lY or COLOR.lR)
-                mStr(isYou and "YOU" or (P.username or "OPPONENT"), P.centerX, P.fieldY-72)
+                mStr(isYou and "YOU" or (P.username or "OPPONENT"), P.centerX or 0, (P.fieldY or 0)-72)
             end
         end
 
@@ -504,6 +536,39 @@ function scene.draw()
             gc_print(text.spectating,940,0)
         end
     else
+        if NET.matchFoundPending and NET.matchFoundCountdown>0 then
+            gc_setColor(0,0,0,.7)
+            gc.rectangle('fill',0,0,1280,720)
+            setFont(50)
+            gc_setColor(COLOR.lG)
+            mStr(text.matchFound or "Match Found!",640,180)
+
+            local oppName="???"
+            if NET.matchFoundOppId then
+                oppName=USERS.getUsername(NET.matchFoundOppId) or "Player"
+            end
+            local myElo=STAT.elo or 1200
+            local oppElo=1200
+            for i=1,#NET.onlinePlayers do
+                if NET.onlinePlayers[i].id==NET.matchFoundOppId then
+                    oppElo=NET.onlinePlayers[i].elo or 1200
+                    break
+                end
+            end
+
+            setFont(30)
+            gc_setColor(COLOR.Z)
+            gc_printf("You  ("..myElo..")",0,280,1280,'center')
+            gc_printf(text.matchFoundVS or "VS",0,330,1280,'center')
+            gc_setColor(COLOR.lR)
+            gc_printf(oppName.."  ("..oppElo..")",0,380,1280,'center')
+
+            setFont(35)
+            gc_setColor(COLOR.lY)
+            local cd=math.ceil(NET.matchFoundCountdown)
+            mStr((text.matchFoundStarting or "Starting in %ds"):format(cd),640,480)
+        end
+
         if textBox.hide then
             -- Users
             NETPLY.draw()
