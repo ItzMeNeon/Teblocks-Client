@@ -429,8 +429,8 @@ function scene.update(dt)
                 if not GAME.replaying and not NET.spectate and P1.frameRun-lastUpstreamTime>8 then
                     local stream
                     if not GAME.rep[upstreamProgress] then
-                        ins(GAME.rep,P1.frameRun)
-                        ins(GAME.rep,0)
+                        GAME.repAdd(P1.frameRun)
+                        GAME.repAdd(0)
                     end
                     stream,upstreamProgress=DATA.dumpRecording(GAME.rep,upstreamProgress)
                     if #stream%3==1 then

@@ -536,6 +536,12 @@ function destroyPlayers()-- Destroy all player objects, restore freerows and fre
     TABLE.cut(PLAYERS)
     TABLE.cut(PLY_ALIVE)
 end
+function GAME.repAdd(v)
+    if #GAME.rep >= GAME.repMax then
+        table.remove(GAME.rep, 1)
+    end
+    ins(GAME.rep, v)
+end
 function pauseGame()
     if not SCN.swapping then
         if not GAME.replaying then

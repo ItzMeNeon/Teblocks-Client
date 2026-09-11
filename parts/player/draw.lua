@@ -16,6 +16,8 @@ local shader_alpha,shader_lighter=SHADER.alpha,SHADER.lighter
 local shader_fieldSatur,shader_blockSatur=SHADER.fieldSatur,SHADER.blockSatur
 local TEXTOBJ,ENUM_MISSION,BLOCK_COLORS=TEXTOBJ,ENUM_MISSION,BLOCK_COLORS
 
+local _prevMissionNum,_prevMissionList,_RLEMissions=nil,nil,nil
+
 
 local RCPB={10,33,200,33,105,5,105,60}
 local attackColor={
@@ -582,24 +584,26 @@ local function _drawNext(P,repMode)
     gc_translate(-488,-20)
 end
 local _drawDial do
-    local function _getDialBackColor(speed)
-        if     speed<60  then return COLOR.H
-        elseif speed<120 then return COLOR.Z
-        elseif speed<180 then return COLOR.lC
-        elseif speed<240 then return COLOR.lG
-        elseif speed<300 then return COLOR.lY
-        elseif speed<420 then return COLOR.O
-        else                  return COLOR.R
+    local _dialBackColor={COLOR.H,COLOR.Z,COLOR.lC,COLOR.lG,COLOR.lY,COLOR.O,COLOR.R}
+    local _dialColor={COLOR.Z,COLOR.lC,COLOR.lG,COLOR.lY,COLOR.O,COLOR.R}
+    local function _getDialIdx(speed)
+        if speed<240 then
+            if speed<120 then
+                return speed<60 and 1 or 2
+            else
+                return speed<180 and 3 or 4
+            end
+        elseif speed<420 then
+            return speed<300 and 5 or 6
+        else
+            return 7
         end
     end
+    local function _getDialBackColor(speed)
+        return _dialBackColor[_getDialIdx(speed)]
+    end
     local function _getDialColor(speed)
-        if     speed<60  then return COLOR.Z
-        elseif speed<120 then return COLOR.lC
-        elseif speed<180 then return COLOR.lG
-        elseif speed<240 then return COLOR.lY
-        elseif speed<300 then return COLOR.O
-        else                  return COLOR.R
-        end
+        return _dialColor[_getDialIdx(speed)]
     end
     function _drawDial(x,y,speed)
         local theta=3*math.pi/2+((math.pi*(speed<300 and speed or 150+speed/2)/30)%MATH.tau)
@@ -669,10 +673,10 @@ local function _drawLife(life)
     end
 end
 local function _drawMission(curMission,L,missionkill)
-    if curMission~=prevMissionNum or not TABLE.compare(L,prevL) then
-        prevMissionNum=curMission
-        prevL=TABLE.copy(L)
-        RLEMissions=TABLE.RLE(TABLE.sub(L,curMission))
+    if curMission~=_prevMissionNum or #L~=(_prevMissionList and #_prevMissionList or 0) or not TABLE.compare(L,_prevMissionList) then
+        _prevMissionNum=curMission
+        _prevMissionList=TABLE.copy(L)
+        _RLEMissions=TABLE.RLE(TABLE.sub(L,curMission))
     end
 
     -- Draw current mission
@@ -682,22 +686,22 @@ local function _drawMission(curMission,L,missionkill)
         gc_setColor(.97,.97,.97)
     end
     gc_push()
-        if RLEMissions[1][2]>1 then
+        if _RLEMissions[1][2]>1 then
             setFont(20)
-            gc_print("×"..RLEMissions[1][2],98,130)
+            gc_print("×".._RLEMissions[1][2],98,130)
             gc_translate(-30,0)
         end
 
         setFont(35)
-        gc_print(ENUM_MISSION[RLEMissions[1][1]],85,110)
+        gc_print(ENUM_MISSION[_RLEMissions[1][1]],85,110)
 
         -- Draw next mission
         for i=2,4 do
-            local m=RLEMissions[i]
+            local m=_RLEMissions[i]
             if m then
                 local amt=m[2]
                 m=ENUM_MISSION[m[1]]
-                if RLEMissions[i][2]>1 then
+                if _RLEMissions[i][2]>1 then
                     setFont(14)
                     gc_print("×"..amt,118-28*i,127)
                     gc_translate(-18,0)

@@ -32,18 +32,6 @@ end
 function Player:_showText(text,dx,dy,font,style,spd,stop)
     ins(self.bonus,TEXT.getText(text,150+dx,300+dy,font,style,spd,stop))
 end
-function Player:_createLockFX(x,y,t)-- Not used
-    ins(self.lockFX,{x,y,0,t})
-end
-function Player:_createDropFX(x,y,w,h)-- Not used
-    ins(self.dropFX,{x,y,w,h})
-end
-function Player:_createMoveFX(color,x,y,spd)-- Not used
-    ins(self.moveFX,{color,x,y,0,spd})
-end
-function Player:_createClearingFX(y,spd)-- Not used
-    ins(self.clearFX,{y,0,spd})
-end
 function Player:_rotateField(dir)
     if self.gameEnv.shakeFX then
         if dir==1 or dir==3 then
@@ -577,9 +565,8 @@ local playerActions={
 }function Player:pressKey(keyID)
     if self.id==1 then
         if GAME.recording then
-            local L=GAME.rep
-            ins(L,self.frameRun)
-            ins(L,keyID)
+            GAME.repAdd(self.frameRun)
+            GAME.repAdd(keyID)
         elseif self.streamProgress then
             VK.press(keyID)
         end
@@ -607,9 +594,8 @@ end
 function Player:releaseKey(keyID)
     if self.id==1 then
         if GAME.recording then
-            local L=GAME.rep
-            ins(L,self.frameRun)
-            ins(L,32+keyID)
+            GAME.repAdd(self.frameRun)
+            GAME.repAdd(32+keyID)
         elseif self.streamProgress then
             VK.release(keyID)
         end
@@ -803,12 +789,12 @@ function Player:extraEvent(eventName,...)
     -- normal local replay. This keeps the combined net replay free of
     -- duplicated cross-events that would otherwise desync the boards.
     if self.type~='remote' then
-        ins(GAME.rep,self.frameRun)
-        ins(GAME.rep,64+eventID)
-        ins(GAME.rep,self.sid)
+        GAME.repAdd(self.frameRun)
+        GAME.repAdd(64+eventID)
+        GAME.repAdd(self.sid)
         local data={...}
         for i=1,#data do
-            ins(GAME.rep,data[i])
+            GAME.repAdd(data[i])
         end
     end
 end
@@ -2605,7 +2591,7 @@ local function _updateMisc(P,dt)
     end
 
     -- Update texts
-    if P.bonus then
+    if #P.bonus>0 then
         TEXT.update(1/60,P.bonus)
     end
 
@@ -2733,18 +2719,6 @@ local function update_alive(P,dt)
                 if L[i]>0 then
                     L[i]=L[i]-1
                 end
-            end
-        end
-    end
-
-    -- Buffer IRS after IRS cut delay has elapsed.
-    -- The purpose of this is to allow the player to release their rotate key during the IRS cut delay,
-    -- which will allow them to avoid accidentally using IRS.
-    if P.bufferedDelay then
-        P.bufferedDelay=P.bufferedDelay-1
-        if P.bufferedDelay<=0 then
-            if P.bufferedIRS then
-                P:resolveIRS()
             end
         end
     end
@@ -2944,16 +2918,6 @@ local function update_alive(P,dt)
     end
 
     _updateMisc(P,dt)
-    --[[
-        P:setPosition(
-            640-150-(30*(P.curX+P.cur.sc[2])-15),
-            30*(P.curY+P.cur.sc[1])+15-300+(
-                ENV.smooth and P.ghoY~=P.curY and
-                (P.dropDelay/ENV.drop-1)*30
-                or 0
-            )
-        )
-    ]]
 end
 local function update_streaming(P)
     local eventTime=P.stream[P.streamProgress]
@@ -2968,28 +2932,9 @@ local function update_streaming(P)
             local eventName=P.gameEnv.extraEvent[event-64][1]
             local eventParamCount=P.gameEnv.extraEvent[event-64][2]
             local sourceSid=P.stream[P.streamProgress+2]
-            local paramList={}
-            for i=1,eventParamCount do
-                ins(paramList,P.stream[P.streamProgress+2+i])
-            end
-			-- The recorded stream already uses canonical sids (the attacker's
-			-- and target's PLAYER.sid values), which are assigned identically
-			-- on every client via NET.uid_sid and stay consistent inside a
-			-- combined replay. No client-relative translation is needed, so
-			-- route attacks directly by those sids. The P.sid==sourceSid gate
-			-- below still isolates each stream to its owner, preventing the
-			-- same attack from being applied twice.
-			P.streamProgress=P.streamProgress+eventParamCount+1
+            local paramBase=P.streamProgress+3
+            P.streamProgress=P.streamProgress+eventParamCount+1
 
-            -- In live net play the attacker's client records the event and the
-            -- opponent receives it over the network, applying it to their own
-            -- local player. In a single-client replay both streams are driven
-            -- here, and each .rep already contains *every* attack from both
-            -- sides (see Player:extraEvent / Player:attack). So the same attack
-            -- appears in both myList and oppList. To avoid applying it twice
-            -- (which would desync the garbage and corrupt the replay), only
-            -- fire it from the stream owned by the attacker (sourceSid). The
-            -- attack is still routed to its *target* player as in live play.
             if P.sid==sourceSid then
                 local SRC
                 for _,p in next,PLAYERS do
@@ -3000,16 +2945,28 @@ local function update_streaming(P)
                 end
                 local subject=P
                 if eventName=='attack' then
-                    local targetSid=paramList[1]
+                    local targetSid=P.stream[paramBase]
                     for _,p in next,PLAYERS do
                         if p.sid==targetSid then
                             subject=p
                             break
                         end
                     end
-                end
-                if SRC and subject then
-                    subject.gameEnv.extraEventHandler[eventName](subject,SRC,unpack(paramList))
+                    if SRC and subject then
+                        subject.gameEnv.extraEventHandler['attack'](subject,SRC,
+                            P.stream[paramBase+1],
+                            P.stream[paramBase+2],
+                            P.stream[paramBase+3],
+                            P.stream[paramBase+4])
+                    end
+                else
+                    local paramList={}
+                    for i=1,eventParamCount do
+                        ins(paramList,P.stream[paramBase+i-1])
+                    end
+                    if SRC and subject then
+                        subject.gameEnv.extraEventHandler[eventName](subject,SRC,unpack(paramList))
+                    end
                 end
             end
         end
@@ -3050,8 +3007,8 @@ function Player:_die()
     end
     if GAME.net and not GAME.replaying then
         if self.id==1 then
-            ins(GAME.rep,self.frameRun)
-            ins(GAME.rep,0)
+            GAME.repAdd(self.frameRun)
+            GAME.repAdd(0)
         else
             if self.lastRecv and self.lastRecv.id==1 then
                 SFX.play('collect')

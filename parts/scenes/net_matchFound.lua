@@ -4,7 +4,7 @@ local gc=love.graphics
 local gc_setColor,gc_setLineWidth=gc.setColor,gc.setLineWidth
 local gc_rectangle=gc.rectangle
 local gc_print,gc_printf=gc.print,gc.printf
-local gc_push,gc_pop=gc.push,gc.pop
+local gc_push,gc_pop,gc_replaceTransform=gc.push,gc.pop,gc.replaceTransform
 local gc_translate=gc.translate
 local gc_line=gc.line
 local setFont=FONT.set
@@ -56,14 +56,16 @@ end
 
 function scene.draw()
     if NET.matchFoundPending and NET.matchFoundCountdown>0 then
+        gc_replaceTransform(SCR.origin)
         gc_setColor(0,0,0,1)
-        gc_rectangle('fill',0,0,1280,720)
+        gc_rectangle('fill',0,0,SCR.w,SCR.h)
 
         local elapsed = love.timer.getTime() - (NET.matchFoundTime or 0)
 
         local shakeX=NET.shakeStr>0 and (math.random()-.5)*NET.shakeStr*2.5 or 0
         local shakeY=NET.shakeStr>0 and (math.random()-.5)*NET.shakeStr*2.5 or 0
         gc_push('transform')
+        gc_replaceTransform(SCR.xOy)
         gc_translate(shakeX, shakeY)
 
         gc_setColor(.06,.06,.06,1)

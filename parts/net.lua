@@ -387,8 +387,6 @@ local actMap={
     } for k,v in next,actMap do actMap[v]=k end
 
 local function wsSend(act,data)
-    -- print(("Send: $1 -->"):repD(act))
-    -- print(("Send: $1 -->"):repD(act)) print(type(data)=='table' and TABLE.dump(data) or tostring(data),"\n")
     WS.send('game',JSON.encode{
         action=assert(act),
         data=data,
@@ -1258,8 +1256,8 @@ function NET.wsCallBack.match_found(body)
     NET.shakeTime=0.5
 
     if oppId then NET.getUserInfo(oppId) end
-    SYSFX.newShade(1.2, 0, 0, 1280, 720)
-    SYSFX.newRectRipple(2, 640, 360, 1280, 720)
+    SYSFX.newShade(1.2, 0, 0, SCR.w, SCR.h)
+    SYSFX.newRectRipple(2, SCR.cx, SCR.cy, SCR.w, SCR.h)
 
     NET._pendingMatchFoundScene=true
 end
@@ -1489,8 +1487,6 @@ function NET.ws_update()
                 return
             elseif msg then
                 msg=JSON.decode(msg)
-                -- print(("Recv:      <-- $1 err:$2"):repD(msg.action,msg.errno))
-                -- print(("Recv:      <-- $1 err:$2"):repD(msg.action,msg.errno)) print(TABLE.dump(msg),"\n")
                 if msg.errno~=0 then
                     local errMsg=msg.message
                     if not errMsg and msg.data and type(msg.data)=='table' and msg.data.reason then

@@ -525,6 +525,7 @@ do-- Game data tables
         modeEnv=false,           -- Current gamemode environment
         setting={},              -- Game settings
         rep={},                  -- Recording list, key,time,key,time...
+        repMax=500000,           -- Soft cap on recording length (~2-3 hours at 60fps)
         statSaved=true,          -- If recording saved
         recording=false,         -- If recording
         replaying=false,         -- If replaying
