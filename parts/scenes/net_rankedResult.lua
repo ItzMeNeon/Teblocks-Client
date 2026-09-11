@@ -27,6 +27,7 @@ function scene.enter()
     CARD.reset()
     CARD.enter()
     BG.set()
+    LOBBY.reset()
     R=NET.rankedResult or false
     DiscordRPC.update("Ranked Results")
 end

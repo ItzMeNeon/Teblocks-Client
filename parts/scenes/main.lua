@@ -12,6 +12,7 @@ local HIDE_L=-1200-- Off-screen left (hidden)
 local HIDE_R=2400-- Off-screen right (hidden)
 local submenu=false
 local targetMain,targetSub={},{}
+local searchPopupAlpha=0
 local pos={
     -- 6 primary big buttons (slide away when Quick Play submenu opens)
     qplay   ={LX,HIDE_L},
@@ -172,6 +173,14 @@ function scene.update(dt)
         local sh=SLIDE_W[L[i].name] and (WIDGET.isFocus(L[i]) and (tx<640 and 100 or -100) or 0) or 0
         L[i].x=MATH.expApproach(L[i].x,tx-L[i].w*.5+sh,dt*9)
     end
+
+    if NET.matchFoundPending then
+        searchPopupAlpha=math.max(0,searchPopupAlpha-dt*6)
+    elseif NET.matchmaking then
+        searchPopupAlpha=math.min(1,searchPopupAlpha+dt*6)
+    else
+        searchPopupAlpha=math.max(0,searchPopupAlpha-dt*6)
+    end
 end
 
 local function _tipStencil()
@@ -234,6 +243,16 @@ function scene.draw()
         GC.setColor(1,1,1,flash)
         GC.rectangle('fill',0,0,SCR.w,SCR.h)
         GC.replaceTransform(SCR.xOy)
+    end
+
+    if searchPopupAlpha>.01 then
+        GC.setColor(COLOR.lY[1],COLOR.lY[2],COLOR.lY[3],searchPopupAlpha*.85)
+        FONT.set(20)
+        GC.mStr("Ranked match searching...",640,680)
+        if NET.searchTimer then
+            GC.setColor(COLOR.lH[1],COLOR.lH[2],COLOR.lH[3],searchPopupAlpha*.7)
+            GC.mStr(("Elapsed: %.1fs"):format(NET.searchTimer),640,705)
+        end
     end
 end
 

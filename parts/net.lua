@@ -31,8 +31,15 @@ local NET={
     matchFoundPending=false,
     matchFoundCountdown=0,
     matchFoundSeed=nil,
+    matchFoundTime=nil,
     matchFoundOppId=nil,
     matchFoundMatchId=nil,
+
+    matchmaking=false,
+    searchTimer=0,
+
+    shakeStr=0,
+    shakeTime=0,
 
     roomAllReady=false,
 
@@ -67,6 +74,7 @@ function NET.updateMatchFoundCountdown(dt)
     NET.matchFoundCountdown=math.max(0,NET.matchFoundCountdown-dt)
     if NET.matchFoundCountdown<=0 then
         NET.matchFoundPending=false
+        NET.matchFoundTime=nil
         TASK.lock('netPlaying')
         if NET.matchFoundSeed then
             NET.seed=NET.matchFoundSeed
@@ -186,6 +194,7 @@ function NET.login(auto)
                 USER.uid=res.data.playerId
                 if res.data.accessToken then
                     USER.aToken=res.data.accessToken
+                    USER.oToken=res.data.accessToken
                 end
                 if res.data.username then
                     USERS.updateUsername(USER.uid,res.data.username)
@@ -373,6 +382,8 @@ local actMap={
     rollback_trigger=        1412, -- S->C: server detected divergence
     input_submit=            1413, -- C->S: client submits local input frame(s)
     input_hash=              1414, -- C->S: client local sim hash at frame F
+    save_upload=            1500, -- C->S: upload cloud save
+    save_download=          1501, -- C->S: request cloud save download
     } for k,v in next,actMap do actMap[v]=k end
 
 local function wsSend(act,data)
@@ -448,6 +459,16 @@ function NET.room_chat(msg,rid)
 end
 function NET.room_create(data)
     if not TASK.lock('createRoom',10) then MES.new('warn',text.tooFrequent) return end
+    if not NET.roomState then
+        NET.roomState={
+            info={name=false,type=false,version=false,description=false},
+            data={},
+            count={Gamer=0,Spectator=0},
+            capacity=false,
+            private=false,
+            state='Standby',
+        }
+    end
     TABLE.coverR(data,NET.roomState)
     WAIT{timeout=12}
     wsSend(actMap.room_create,data)
@@ -969,7 +990,29 @@ function NET.wsCallBack.room_enter(body)
         NET.roomState=body.data
         NETPLY.clear()
         destroyPlayers()
-        loadGame('netBattle',true,true)
+        local isRanked=body.data.info and body.data.info.type=='ranked'
+        if not isRanked then
+            loadGame('netBattle',true,true)
+        else
+            freshDate()
+            if legalGameTime() then
+                if not MODES.netBattle and FILE.isSafe('parts/modes/netBattle') then
+                    MODES.netBattle=require('parts.modes.netBattle')
+                    MODES.netBattle.name='netBattle'
+                end
+                if MODES.netBattle.score then
+                    STAT.lastPlay='netBattle'
+                end
+                GAME.playing=true
+                GAME.init=true
+                GAME.replaySetup=false
+                GAME.fromRepMenu=false
+                GAME.curModeName='netBattle'
+                GAME.curMode=MODES.netBattle
+                GAME.modeEnv=GAME.curMode.env
+                GAME.net=true
+            end
+        end
         for _,p in next,body.data.players do
             NETPLY.add{
                 uid=p.playerId,
@@ -990,7 +1033,7 @@ function NET.wsCallBack.room_enter(body)
                 if sid then P.sid=sid end
             end
         end
-        if NET.roomState.state=='Playing' then
+        if NET.roomState.state=='Playing' and NET.roomState.info.type~='ranked' then
             NET.storedStream={}
             for _,p in next,body.data.players do
                 table.insert(NET.storedStream,{
@@ -1207,11 +1250,18 @@ function NET.wsCallBack.match_found(body)
 
     NET.matchFoundMatchId=body.data and body.data.matchId
     NET.matchFoundOppId=oppId
-    NET.matchFoundCountdown=15
+    NET.matchFoundCountdown=10
     NET.matchFoundPending=true
     NET.matchFoundSeed=nil
+    NET.matchFoundTime=love.timer.getTime()
+    NET.shakeStr=12
+    NET.shakeTime=0.5
 
     if oppId then NET.getUserInfo(oppId) end
+    SYSFX.newShade(1.2, 0, 0, 1280, 720)
+    SYSFX.newRectRipple(2, 640, 360, 1280, 720)
+
+    NET._pendingMatchFoundScene=true
 end
 function NET.wsCallBack.match_start_ranked(body)
     if NET.matchFoundPending and NET.matchFoundCountdown>0 then
@@ -1284,21 +1334,33 @@ function NET.wsCallBack.match_finish_ranked(body)
         if SCN.cur=='net_game' then
             NET.roomState=nil
             NETPLY.clear()
+            NET.matchmaking=false
+            NET.searchTimer=0
+            NET.matchFoundPending=false
+            NET.matchFoundCountdown=0
+            NET.matchFoundSeed=nil
+            NET.matchFoundTime=nil
+            NET.matchFoundOppId=nil
+            NET.matchFoundMatchId=nil
             SCN.go('net_rankedResult','fade')
         end
     end)
 end
 function NET.wsCallBack.match_cancel()
-    -- Opponent left the queue before a match was formed.
     NET.matchFoundPending=false
     NET.matchFoundCountdown=0
     NET.matchFoundSeed=nil
+    NET.matchFoundTime=nil
     NET.matchFoundOppId=nil
     NET.matchFoundMatchId=nil
-    if SCN.cur~='net_ranked' then return end
-    matchmaking=false
-    searchTimer=0
+    NET._pendingMatchFoundScene=false
+    if SCN.cur~='net_ranked' and SCN.cur~='net_matchFound' then return end
+    NET.matchmaking=false
+    NET.searchTimer=0
     MES.new('info',"Matchmaking cancelled")
+    if SCN.cur=='net_matchFound' then
+        SCN.go('net_ranked')
+    end
 end
 
 -- Inbound handlers for the authoritative-sim protocol (plan Component 2/3).
@@ -1500,7 +1562,7 @@ end
 
 function NET.uploadSave()
     if not TASK.lock('uploadSave',8) then return end
-    wsSend({data={sections={
+    wsSend(actMap.save_upload,{data={sections={
         {section=1,data=STRING.packTable(STAT)},
         {section=2,data=STRING.packTable(RANKS)},
         {section=3,data=STRING.packTable(SETTING)},
@@ -1513,7 +1575,7 @@ function NET.uploadSave()
 end
 function NET.downloadSave()
     if not TASK.lock('downloadSave',8) then return end
-    wsSend({data={sections={1,2,3,4,5,6,7}}})
+    wsSend(actMap.save_download,{data={sections={1,2,3,4,5,6,7}}})
     MES.new('info',"Downloading")
 end
 function NET.loadSavedData(sections)

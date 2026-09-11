@@ -202,6 +202,14 @@ function LOBBY.textInput(t)
     return true
 end
 
+function LOBBY.reset()
+    LOBBY.init()
+    if LOBBY.playerList then LOBBY.playerList:hide() end
+    if LOBBY.chat then LOBBY.chat:hide() end
+    CHAT.focused=false
+    if CHAT.inputText then CHAT.inputText="" end
+end
+
 function LOBBY.isAnyOpen()
     return (LOBBY.playerList and LOBBY.playerList.visible) or (LOBBY.chat and LOBBY.chat.visible)
 end

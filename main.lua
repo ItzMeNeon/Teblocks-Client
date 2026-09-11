@@ -636,10 +636,18 @@ for _,fileName in next,fs.getDirectoryItems('replay') do
 end
 table.sort(REPLAY,function(a,b) return a.fileName>b.fileName end)
 
-AUTHURL="https://backend.teblocks.my.id"
-AUTHHOST="backend.teblocks.my.id"
-WS.switchHost('backend.teblocks.my.id','80','/api/ws')
-HTTP.setHost("backend.teblocks.my.id")
+local localMode=TABLE.find(arg,'--local') or os.getenv("TEBLOCKS_LOCAL")=="1"
+local SERVER_HOST=localMode and "http://127.0.0.1:8080" or "https://backend.teblocks.my.id"
+local AUTH_HOST=localMode and "127.0.0.1:8080" or "backend.teblocks.my.id"
+
+AUTHURL=SERVER_HOST
+AUTHHOST=AUTH_HOST
+if localMode then
+    WS.switchHost('127.0.0.1','8080','/api/ws')
+else
+    WS.switchHost('backend.teblocks.my.id','80','/api/ws')
+end
+HTTP.setHost(SERVER_HOST)
 HTTP.setThreadCount(1)
 
 -- Discord RPC

@@ -1,6 +1,7 @@
 local gc,kb,tc=love.graphics,love.keyboard,love.touch
 
 local gc_setColor=gc.setColor
+local gc_setLineWidth=gc.setLineWidth
 local gc_print,gc_printf=gc.print,gc.printf
 local gc_draw=gc.draw
 local setFont,mStr=FONT.set,GC.mStr
@@ -263,7 +264,15 @@ function scene.keyDown(key,isRep)
             NET.matchFoundPending=false
             NET.matchFoundCountdown=0
             NET.matchFoundSeed=nil
+            NET.matchFoundTime=nil
+            NET.matchFoundOppId=nil
+            NET.matchFoundMatchId=nil
+            NET._pendingMatchFoundScene=false
             NET.ranked_leave()
+            NET.matchmaking=false
+            NET.searchTimer=0
+            NET.shakeStr=0
+            SCN.go('net_ranked')
         elseif not inputBox.hide then
             _switchChat()
         elseif NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked' and playing then
@@ -439,6 +448,13 @@ function scene.update(dt)
             end
         end
     else
+        if NET._pendingMatchFoundScene then
+            NET._pendingMatchFoundScene=nil
+            NET.matchFoundCountdown=10
+            NET.matchFoundTime=love.timer.getTime()
+            SCN.go('net_matchFound')
+            return
+        end
         if not TASK.getLock('netPlaying') then
             if NET.matchFoundPending and NET.matchFoundCountdown>0 then
                 NET.updateMatchFoundCountdown(dt)
@@ -469,6 +485,14 @@ function scene.update(dt)
                 NET.storedStream=false
             end
         end
+    end
+    if NET.shakeStr>0 then
+        NET.shakeStr=math.max(0,NET.shakeStr-dt*16)
+    end
+    if NET.matchFoundPending and NET.matchFoundCountdown>0 then
+        WIDGET.locked=true
+    else
+        WIDGET.locked=false
     end
 end
 
@@ -536,39 +560,6 @@ function scene.draw()
             gc_print(text.spectating,940,0)
         end
     else
-        if NET.matchFoundPending and NET.matchFoundCountdown>0 then
-            gc_setColor(0,0,0,.7)
-            gc.rectangle('fill',0,0,1280,720)
-            setFont(50)
-            gc_setColor(COLOR.lG)
-            mStr(text.matchFound or "Match Found!",640,180)
-
-            local oppName="???"
-            if NET.matchFoundOppId then
-                oppName=USERS.getUsername(NET.matchFoundOppId) or "Player"
-            end
-            local myElo=STAT.elo or 1200
-            local oppElo=1200
-            for i=1,#NET.onlinePlayers do
-                if NET.onlinePlayers[i].id==NET.matchFoundOppId then
-                    oppElo=NET.onlinePlayers[i].elo or 1200
-                    break
-                end
-            end
-
-            setFont(30)
-            gc_setColor(COLOR.Z)
-            gc_printf("You  ("..myElo..")",0,280,1280,'center')
-            gc_printf(text.matchFoundVS or "VS",0,330,1280,'center')
-            gc_setColor(COLOR.lR)
-            gc_printf(oppName.."  ("..oppElo..")",0,380,1280,'center')
-
-            setFont(35)
-            gc_setColor(COLOR.lY)
-            local cd=math.ceil(NET.matchFoundCountdown)
-            mStr((text.matchFoundStarting or "Starting in %ds"):format(cd),640,480)
-        end
-
         if textBox.hide then
             -- Users
             NETPLY.draw()
@@ -695,5 +686,12 @@ scene.widgetList={
     WIDGET.newKey{name='replaySpd10', x=300,y=50, w=60, font=30, fText="10x",               code=function() GAME.replaySpeed=10 end,                                                                                       hideF=function() return not GAME.replaying end},
     WIDGET.newSlider{name='replaySeek',x=160,y=683,w=1020,axis={0,1,false},disp=function() return (NET._replayTotal and NET._replayTotal>0) and NET._replayCur/NET._replayTotal or 0 end,code=function(v) NET._replaySeekFrame=math.floor(v*(NET._replayTotal or 1)); NET._replaySeekPending=true; NET._replaySeekLast=love.timer.getTime() end,hideF=function() return not GAME.replaying end},
 }
+
+function scene.overDraw()
+    if NET.matchFoundPending and NET.matchFoundCountdown>0 then
+        gc_setColor(0,0,0,1)
+        gc.rectangle('fill',0,0,1280,720)
+    end
+end
 
 return scene
