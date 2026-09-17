@@ -159,30 +159,40 @@ jobs:
           # Fix love-android 11.5 GameActivity bug where needToCopyGameInArchive stays false in embed flavor
           sed -i 's/needToCopyGameInArchive = false;/needToCopyGameInArchive = true;/g' love-android/love/src/main/java/org/love2d/android/GameActivity.java
 
-      - name: Build and embed game assets into love-android
+      - name: Embed game assets into love-android
         run: |
           mkdir -p love-android/app/src/embed/assets
 
-          # Build teblocks.love and embed as game.love
-          cd teblocks-src
-          zip -9 -r ../teblocks.love . \
-            -x ".git/*" -x ".github/*" -x "*.DS_Store" -x "dist/*" -x "ColdClear/*" -x "*.love"
-          cd ..
-          cp teblocks.love love-android/app/src/embed/assets/game.love
+          # Unpack game files directly into assets so main.lua is at root of assets/
+          # This enables PhysFS virtual archive mounting (ASET.AASSET) in LÖVE Android
+          rsync -av \
+            --exclude='.git*' \
+            --exclude='.github' \
+            --exclude='dist' \
+            --exclude='ColdClear' \
+            --exclude='love-android' \
+            --exclude='teblocks-src' \
+            teblocks-src/ love-android/app/src/embed/assets/
 
-          # Also unpack game files directly into assets so PhysFS can mount them directly (ASET.AASSET)
-          rsync -av --exclude='.git*' --exclude='.github' --exclude='dist' --exclude='ColdClear' teblocks-src/ love-android/app/src/embed/assets/
+          if [ ! -f love-android/app/src/embed/assets/main.lua ]; then
+            echo "ERROR: main.lua not found in love-android/app/src/embed/assets/"
+            exit 1
+          fi
 
           # Embed ColdClear Android libraries if available
           mkdir -p love-android/app/src/main/jniLibs
           cp -r teblocks-src/ColdClear/Android/* love-android/app/src/main/jniLibs/ 2>/dev/null || true
 
       - name: Decode keystore (if configured)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > love-android/teblocks-release.jks
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > love-android/teblocks-release.jks
+            echo "Keystore decoded successfully"
+          else
+            echo "No keystore secret configured; proceeding with unsigned build"
+          fi
 
       - name: Build APK (release)
         run: |
