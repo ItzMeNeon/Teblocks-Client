@@ -53,21 +53,14 @@ jobs:
           zip -9 -r teblocks.love . \
             -x ".git/*" -x ".github/*" -x "*.DS_Store" -x "dist/*"
 
-      - name: Package Linux (AppImage + .love)
+      - name: Package Linux (fused AppImage)
         run: |
           curl -L -o love-linux.AppImage \
             https://github.com/love2d/love/releases/download/${LOVE_VERSION}/love-${LOVE_VERSION}-x86_64.AppImage
           chmod +x love-linux.AppImage
-          mkdir -p dist/teblocks-linux
-          cp love-linux.AppImage dist/teblocks-linux/teblocks.AppImage
-          cp teblocks.love dist/teblocks-linux/
-          cat > dist/teblocks-linux/run.sh << 'EOF'
-          #!/bin/sh
-          DIR="$(dirname "$0")"
-          exec "$DIR/teblocks.AppImage" "$DIR/teblocks.love"
-          EOF
-          chmod +x dist/teblocks-linux/run.sh
-          cd dist && zip -9 -r teblocks-linux.zip teblocks-linux && cd ..
+          mkdir -p dist
+          cat love-linux.AppImage teblocks.love > dist/teblocks-linux.AppImage
+          chmod +x dist/teblocks-linux.AppImage
 
       - name: Package Windows (fused exe)
         run: |
@@ -79,15 +72,15 @@ jobs:
           cat "$WINDIR/love.exe" teblocks.love > dist/teblocks-windows/teblocks.exe
           cp "$WINDIR"/*.dll dist/teblocks-windows/ 2>/dev/null || true
           cp "$WINDIR/license.txt" dist/teblocks-windows/ 2>/dev/null || true
-          cd dist && zip -9 -r teblocks-windows.zip teblocks-windows && cd ..
+          cd dist && zip -9 -r teblocks-windows-portable.zip teblocks-windows && cd ..
 
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
           name: desktop-builds
           path: |
-            dist/teblocks-linux.zip
-            dist/teblocks-windows.zip
+            dist/teblocks-linux.AppImage
+            dist/teblocks-windows-portable.zip
           retention-days: 7
 
   android:
@@ -119,12 +112,34 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           # ubuntu-latest ships with the Android SDK preinstalled; no setup-android action needed.
 
+      - name: Rename app label to TeBlocks
+        run: |
+          # love-android's default label is "LOVE for Android" — override it wherever it's declared.
+          grep -rl "LOVE for Android" love-android/app/src --include="*.xml" | while read -r f; do
+            sed -i 's/LOVE for Android/TeBlocks/g' "$f"
+            echo "Patched: $f"
+          done
+
+      - name: Verify noCompress for .love assets (debug)
+        run: |
+          echo "--- Searching for aaptOptions/androidResources noCompress in build.gradle files ---"
+          grep -rn "noCompress" love-android/app/build.gradle* || echo "WARNING: no noCompress directive found — .love may get compressed and fail to load at runtime"
+
       - name: Build .love file
         run: |
           cd teblocks-src
           zip -9 -r ../teblocks.love . \
             -x ".git/*" -x ".github/*" -x "*.DS_Store" -x "dist/*"
           cd ..
+
+      - name: Inspect .love contents (debug)
+        run: |
+          echo "--- Top-level entries in teblocks.love ---"
+          unzip -l teblocks.love | head -n 30
+          echo "--- Checking for main.lua at root ---"
+          unzip -l teblocks.love | grep -E "^\s.*\smain\.lua$" || echo "WARNING: main.lua not found at all in the archive"
+          echo "--- conf.lua contents (if present) ---"
+          unzip -p teblocks.love conf.lua 2>/dev/null | grep -i version || echo "No conf.lua or no t.version line found"
 
       - name: Embed .love into love-android
         run: |
@@ -215,8 +230,8 @@ jobs:
           tag_name: ${{ needs.version.outputs.tag }}
           name: ${{ needs.version.outputs.tag }}
           files: |
-            desktop-builds/teblocks-linux.zip
-            desktop-builds/teblocks-windows.zip
+            desktop-builds/teblocks-linux.AppImage
+            desktop-builds/teblocks-windows-portable.zip
             android-build/teblocks-android.apk
           generate_release_notes: true
 
