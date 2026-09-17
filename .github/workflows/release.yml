@@ -1,0 +1,141 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+env:
+  LOVE_VERSION: "11.5"
+
+jobs:
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build .love file
+        run: |
+          zip -9 -r teblocks.love . \
+            -x ".git/*" -x ".github/*" -x "*.DS_Store" -x "dist/*"
+
+      - name: Package Linux (AppImage + .love)
+        run: |
+          curl -L -o love-linux.AppImage \
+            https://github.com/love2d/love/releases/download/${LOVE_VERSION}/love-${LOVE_VERSION}-x86_64.AppImage
+          chmod +x love-linux.AppImage
+          mkdir -p dist/teblocks-linux
+          cp love-linux.AppImage dist/teblocks-linux/teblocks.AppImage
+          cp teblocks.love dist/teblocks-linux/
+          cat > dist/teblocks-linux/run.sh << 'EOF'
+          #!/bin/sh
+          DIR="$(dirname "$0")"
+          exec "$DIR/teblocks.AppImage" "$DIR/teblocks.love"
+          EOF
+          chmod +x dist/teblocks-linux/run.sh
+          cd dist && zip -9 -r teblocks-linux.zip teblocks-linux && cd ..
+
+      - name: Package Windows (fused exe)
+        run: |
+          curl -L -o love-win.zip \
+            https://github.com/love2d/love/releases/download/${LOVE_VERSION}/love-${LOVE_VERSION}-win64.zip
+          unzip -q love-win.zip -d love-win
+          WINDIR="love-win/love-${LOVE_VERSION}-win64"
+          mkdir -p dist/teblocks-windows
+          cat "$WINDIR/love.exe" teblocks.love > dist/teblocks-windows/teblocks.exe
+          cp "$WINDIR"/*.dll dist/teblocks-windows/ 2>/dev/null || true
+          cp "$WINDIR/license.txt" dist/teblocks-windows/ 2>/dev/null || true
+          cd dist && zip -9 -r teblocks-windows.zip teblocks-windows && cd ..
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-builds
+          path: |
+            dist/teblocks-linux.zip
+            dist/teblocks-windows.zip
+          retention-days: 7
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout love-android
+        uses: actions/checkout@v4
+        with:
+          repository: love2d/love-android
+          ref: ${{ env.LOVE_VERSION }}  # pin to match desktop LOVE_VERSION if a matching tag exists; otherwise use a known-good branch/tag
+          submodules: recursive
+          path: love-android
+
+      - name: Checkout TeBlocks source
+        uses: actions/checkout@v4
+        with:
+          path: teblocks-src
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build .love file
+        run: |
+          cd teblocks-src
+          zip -9 -r ../teblocks.love . \
+            -x ".git/*" -x ".github/*" -x "*.DS_Store" -x "dist/*"
+          cd ..
+
+      - name: Embed .love into love-android
+        run: |
+          mkdir -p love-android/app/src/embed/assets
+          cp teblocks.love love-android/app/src/embed/assets/game.love
+
+      - name: Decode keystore (if configured)
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > love-android/teblocks-release.jks
+
+      - name: Build APK (release)
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd love-android
+          ./gradlew assembleEmbedRelease
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          find love-android/app/build/outputs/apk/embed/release -name "*.apk" \
+            -exec cp {} dist/teblocks-android.apk \;
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          path: dist/teblocks-android.apk
+          retention-days: 7
+
+  release:
+    needs: [desktop, android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop-builds/teblocks-linux.zip
+            desktop-builds/teblocks-windows.zip
+            android-build/teblocks-android.apk
+          generate_release_notes: true
