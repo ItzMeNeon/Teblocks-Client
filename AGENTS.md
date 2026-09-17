@@ -2,11 +2,11 @@
 
 ## Project Overview
 
-Techmino is a cross-platform tetromino stacking game built with Lua and LÖVE 11.5. It combines many single-player rule sets with replays/TAS, custom games, localization, configurable presentation and controls, AI players, and online rooms/battles.
+TeBlocks is a cross-platform tetromino stacking game built with Lua and LÖVE 11.5, forked and evolved from Techmino. It combines single-player rule sets with replays/TAS, custom games, localization, configurable presentation and controls, AI players, and online rooms/battles with dedicated game server architecture.
 
 ## Architecture & Data Flow
 
-- `conf.lua` configures LÖVE, platform/window behavior, enabled engine modules, and the `Techmino` save identity. `main.lua` is the application bootstrap.
+- `conf.lua` configures LÖVE, platform/window behavior, enabled engine modules, and the `TeBlocks` save identity. `main.lua` is the application bootstrap.
 - `main.lua` loads `Zframework`, which owns the LÖVE event loop and exposes global services such as `SCN`, `TASK`, `FILE`, `HTTP`, `WS`, and graphics/audio helpers. Bootstrap then loads shared game tables/functions, assets, persisted state, modes, backgrounds, and scenes.
 - UI actions call `loadGame(mode, quickPlay, net)` in `parts/gameFuncs.lua`. This resolves `MODES[mode]`, populates `GAME`, and transitions through `SCN` to `game` or `net_game`.
 - Player construction in `parts/player/init.lua` resolves configuration in this precedence order: `GAME.modeEnv` -> `GAME.setting` -> global `SETTING` -> `parts/player/gameEnv0.lua` defaults. It then merges the selected `parts/eventsets/` hooks and initializes randomizers/tasks.
@@ -27,7 +27,6 @@ Techmino is a cross-platform tetromino stacking game built with Lua and LÖVE 11
 | `media/` | Shipped images, music, effects, samples, and voice packs. Preserve third-party attribution. |
 | `Zframework/` | Bundled legacy LÖVE framework and global runtime services; modify conservatively. |
 | `.github/build/` | Platform-specific packaging resources, icons, and templates. |
-| `.github/actions/` | Local composite actions used by CI. |
 
 ## Development Commands
 
@@ -44,9 +43,7 @@ love . --test
 xvfb-run --auto-servernum ./love.AppImage ./core.love --test
 ```
 
-There is no repository-defined Makefile, dependency-install script, formatter command, or lint command. `.github/workflows/main.yml` is the authoritative build/package workflow. It packages `media/`, `parts/`, `Zframework/`, `conf.lua`, `main.lua`, `version.lua`, `legals.md`, and `license.txt` into `core.love`, then produces Android, Linux, web, and Windows artifacts. Do not invent npm/LuaRocks workflows.
-
-For web packaging, CI uses unpinned `npx love.js`; check `.github/workflows/main.yml` before reproducing or changing that command.
+There is no repository-defined Makefile, dependency-install script, formatter command, or lint command. `.github/workflows/release.yml` is the authoritative build/package workflow. It builds Linux (AppImage), Windows portable, and Android release packages. Do not invent npm/LuaRocks workflows.
 
 ## Code Conventions & Common Patterns
 
@@ -71,19 +68,17 @@ For web packaging, CI uses unpinned `npx love.js`; check `.github/workflows/main
 - `parts/player/init.lua`, `parts/player/player.lua`: player environment composition and simulation behavior.
 - `parts/modes.lua`: mode metadata, map placement, icons, and unlock graph.
 - `parts/net.lua`, `parts/netPlayer.lua`: online transport, room state, and remote players.
-- `version.lua`: runtime and package version metadata consumed by CI.
-- `updateLog.txt`: release history; CI parses the first numeric section for release notes.
+- `version.lua`: runtime and package version metadata.
 - `.editorconfig`: the only repository formatting policy.
-- `.github/workflows/main.yml`: CI triggers, smoke test, packaging, release, and Pages deployment.
+- `.github/workflows/release.yml`: CI triggers, packaging, and release deployment.
 - `legals.md`, `license.txt`: LGPLv3 and third-party notices.
 
 ## Runtime/Tooling Preferences
 
-- Runtime: LÖVE 11.5 (LuaJIT in normal LÖVE builds). Standalone Lua 5.3 in CI is only used to read release metadata.
+- Runtime: LÖVE 11.5 (LuaJIT in normal LÖVE builds).
 - Package manager: none. There is no `package.json`, lockfile, rockspec, or vendored package-manager workflow.
 - Treat `Zframework` as legacy internal infrastructure, not a reusable framework recommendation. Existing code depends on its globals and event loop.
-- Build outputs belong under CI's `build/`/`release/` staging, not in source directories. Current CI packages Android, Linux, web, and Windows; macOS/iOS assets exist but have no current workflow jobs.
-- Update `version.lua` and place the newest entry first in `updateLog.txt` for releases. Check `.github/actions/update-version/action.yml` carefully: its snapshot identity replacement no longer matches current `conf.lua`.
+- Build outputs belong under CI's `dist/` staging, not in source directories. Current CI packages Android, Linux, and Windows.
 
 ## Testing & QA
 
