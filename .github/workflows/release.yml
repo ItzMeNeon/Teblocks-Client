@@ -114,11 +114,21 @@ jobs:
           cd love-android
           ./gradlew assembleEmbedRelease
 
+      - name: List APK outputs (debug)
+        run: |
+          echo "Searching for APKs under love-android/app/build/outputs..."
+          find love-android/app/build/outputs -type f -name "*.apk" || true
+
       - name: Rename APK
         run: |
           mkdir -p dist
-          find love-android/app/build/outputs/apk/embed/release -name "*.apk" \
-            -exec cp {} dist/teblocks-android.apk \;
+          APK_PATH=$(find love-android/app/build/outputs -type f -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found under love-android/app/build/outputs — build likely failed silently or produced no output."
+            exit 1
+          fi
+          echo "Found APK at: $APK_PATH"
+          cp "$APK_PATH" dist/teblocks-android.apk
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
