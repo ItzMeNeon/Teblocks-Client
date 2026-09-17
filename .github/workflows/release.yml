@@ -160,16 +160,40 @@ jobs:
           echo "Searching for APKs under love-android/app/build/outputs..."
           find love-android/app/build/outputs -type f -name "*.apk" || true
 
-      - name: Rename APK
+      - name: Locate unsigned APK
+        id: locate
         run: |
-          mkdir -p dist
           APK_PATH=$(find love-android/app/build/outputs -type f -name "*.apk" | head -n 1)
           if [ -z "$APK_PATH" ]; then
             echo "No APK found under love-android/app/build/outputs — build likely failed silently or produced no output."
             exit 1
           fi
-          echo "Found APK at: $APK_PATH"
-          cp "$APK_PATH" dist/teblocks-android.apk
+          echo "Found unsigned APK at: $APK_PATH"
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Align and sign APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          BUILD_TOOLS=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)
+          ZIPALIGN="$ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign"
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
+          echo "Using build-tools: $BUILD_TOOLS"
+
+          mkdir -p dist
+          "$ZIPALIGN" -f -p 4 "${{ steps.locate.outputs.apk_path }}" dist/teblocks-aligned.apk
+
+          "$APKSIGNER" sign \
+            --ks love-android/teblocks-release.jks \
+            --ks-pass "pass:${ANDROID_KEYSTORE_PASSWORD}" \
+            --ks-key-alias "${ANDROID_KEY_ALIAS}" \
+            --key-pass "pass:${ANDROID_KEY_PASSWORD}" \
+            --out dist/teblocks-android.apk \
+            dist/teblocks-aligned.apk
+
+          "$APKSIGNER" verify dist/teblocks-android.apk && echo "APK signature verified OK"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
