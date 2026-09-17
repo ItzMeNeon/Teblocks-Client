@@ -182,12 +182,13 @@ function NET.login(auto)
             timeout=12.6,
         }
 
-        if USER.aToken then
+        local token = USER.aToken or USER.oToken
+        if token then
             local res=getMsg({
                 pool='login',
                 url=AUTHHOST,
                 path='/api/auth/check',
-                headers={["x-access-token"]=USER.aToken},
+                headers={["x-access-token"]=token},
             },6.26)
 
             if res and res.code and math.floor(res.code/100)==2 then
@@ -202,15 +203,19 @@ function NET.login(auto)
                 saveUser()
                 NET.ws_connect()
                 NET.getUserInfo(USER.uid)
+                local CARD=require'parts.userCard'
+                CARD.reset()
                 if not auto then-- Quit login menu
                     SCN.pop()
                 end
-                SCN.go('lobby')
+                if auto and SCN.cur ~= 'main' then
+                    SCN.go('lobby')
+                end
                 WAIT.interrupt()
                 return
             end
         end
-        if auto then
+        if auto and SCN.cur ~= 'main' then
             SCN.go('lobby')
         end
 
@@ -247,7 +252,12 @@ function NET.loginWithPassword(username,password)
             saveUser()
             NET.ws_connect()
             NET.getUserInfo(USER.uid)
-            SCN.go('lobby')
+            local CARD=require'parts.userCard'
+            CARD.reset()
+            MES.new('check',"Logged in as "..(res.data.username or username))
+            if SCN.cur == 'login' then
+                SCN.go('main')
+            end
             WAIT.interrupt()
             return
         elseif res then
@@ -1405,6 +1415,8 @@ function NET.startupConnect()
     TASK.new(function()
         if USER.aToken and not USER.oToken then
             USER.oToken = USER.aToken
+        elseif USER.oToken and not USER.aToken then
+            USER.aToken = USER.oToken
         end
         NET.ws_connect()
     end)
@@ -1412,7 +1424,8 @@ end
 
 function NET.ws_connect()
     if WS.status('game')=='dead' then
-        WS.connect('game','',{['x-access-token']=USER.oToken or ''},6)
+        local tok = USER.oToken or USER.aToken or ''
+        WS.connect('game','',{['x-access-token']=tok},6)
         TASK.removeTask_code(NET.ws_update)
         TASK.new(NET.ws_update)
     end
@@ -1436,17 +1449,19 @@ function NET.ws_update()
         end
     end
 
-    if USER.oToken then
+    local token = USER.oToken or USER.aToken
+    if token then
         local res=getMsg({
             pool='getUID',
             path='/api/auth/check',
-            headers={["x-access-token"]=USER.oToken},
+            headers={["x-access-token"]=token},
         },6.26)
 
         if res and res.code and math.floor(res.code/100)==2 then
             USER.uid=res.data.playerId
             if res.data.accessToken then
                 USER.oToken=res.data.accessToken
+                USER.aToken=res.data.accessToken
             end
             if res.data.username then
                 USERS.updateUsername(USER.uid,res.data.username)
@@ -1456,10 +1471,15 @@ function NET.ws_update()
             NET.player_updateConf()
             -- Sync our competitive elo/rank from the server (persists across restarts).
             NET.getUserInfo(USER.uid)
+            local CARD=require'parts.userCard'
+            CARD.reset()
         elseif res and res.code==401 then
             USER.aToken=false
             USER.oToken=false
+            USER.uid=false
             saveUser()
+            local CARD=require'parts.userCard'
+            CARD.reset()
             if SCN.cur and (SCN.cur:sub(1,3)=='net' or SCN.cur=='lobby') then
                 TEST.yieldUntilNextScene()
                 GAME.playing=false

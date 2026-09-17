@@ -249,7 +249,15 @@ scene.widgetList = {
         color  = 'lP',
         font   = 22,
         fText  = CHAR.mino.T,
-        code   = goScene'skin_browse',
+        code   = function()
+            if not (USER and USER.uid and USER.uid ~= false) then
+                MES.new('warn', "Please log in to access Skin Direct")
+                local AUTH = require 'parts.authModal'
+                AUTH.open('login')
+            else
+                SCN.go('skin_browse')
+            end
+        end,
     },
     WIDGET.newButton{
         name   = 'settings',

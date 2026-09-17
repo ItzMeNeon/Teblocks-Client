@@ -98,7 +98,15 @@ scene.widgetList={
             SETsto('skinSet')(list[scene.widgetList.skinSet.select],scene.widgetList.skinSet.select)
         end
     end},
-    WIDGET.newButton{name='skinDirect',x=1050,y=100,w=180,h=65,color='lP',font=20,fText="Skin Direct",code=function() SCN.go('skin_browse') end},
+    WIDGET.newButton{name='skinDirect',x=1050,y=100,w=180,h=65,color='lP',font=20,fText="Skin Direct",code=function()
+        if not (USER and USER.uid and USER.uid ~= false) then
+            MES.new('warn', "Please log in to access Skin Direct")
+            local AUTH = require 'parts.authModal'
+            AUTH.open('login')
+        else
+            SCN.go('skin_browse')
+        end
+    end},
     WIDGET.newButton{name='prev1',    x=130,y=220,w=80,h=65,sound='hold',font=40,fText="↑",code=function() _prevSkin(1) end},
     WIDGET.newButton{name='prev2',    x=270,y=220,w=80,h=65,sound='hold',font=40,fText="↑",code=function() _prevSkin(2) end},
     WIDGET.newButton{name='prev3',    x=410,y=220,w=80,h=65,sound='hold',font=40,fText="↑",code=function() _prevSkin(3) end},

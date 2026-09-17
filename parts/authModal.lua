@@ -95,6 +95,7 @@ function AUTH.open(mode)
     password=""
     focusedField="username"
     _isOpen=true
+    AUTH.openTimer=0.35
     love.keyboard.setTextInput(true)
 end
 
@@ -117,6 +118,9 @@ end
 
 function AUTH.update(dt)
     WIDGET.locked=_isOpen
+    if AUTH.openTimer and AUTH.openTimer > 0 then
+        AUTH.openTimer = math.max(0, AUTH.openTimer - dt)
+    end
     if _isOpen then
         AUTH.overlayAlpha=math.min(AUTH.overlayAlpha+dt*10,0.7)
         AUTH.boxAlpha=math.min(AUTH.boxAlpha+dt*10,1)
@@ -197,7 +201,9 @@ function AUTH.mouseClick(x,y)
     local x1,y1=290,120
     local x2,y2=x1+w,y1+h
     if x<x1 or x>x2 or y<y1 or y>y2 then
-        _close()
+        if not (AUTH.openTimer and AUTH.openTimer > 0) then
+            _close()
+        end
         return true
     end
 

@@ -171,6 +171,13 @@ end
 --  SCENE LIFECYCLE
 -- ════════════════════════════════════════════════════════════
 function scene.enter()
+    if not (USER and USER.uid and USER.uid ~= false) then
+        MES.new('warn', "Please log in to browse community skins")
+        SCN.back()
+        AUTH.open('login')
+        return
+    end
+
     BG.set()
     SKIN_REPO.init()
     setTab('online')
@@ -187,11 +194,15 @@ function scene.enter()
 end
 
 local lastSearchValue = ""
+local lastRepoVersion = -1
 
 function scene.update(dt)
-    if currentTab == 'online' and searchBox.value ~= lastSearchValue then
-        lastSearchValue = searchBox.value
-        refreshLists()
+    if currentTab == 'online' then
+        if searchBox.value ~= lastSearchValue or (SKIN_REPO.version and SKIN_REPO.version ~= lastRepoVersion) then
+            lastSearchValue = searchBox.value
+            lastRepoVersion = SKIN_REPO.version
+            refreshLists()
+        end
     end
 end
 
@@ -356,10 +367,17 @@ function scene.mouseDown(x, y)
         -- Top Right: "🔄 Refresh" (x=1070..1160)
         if x >= 1070 and x <= 1160 then
             SKIN.reloadUser('skins')
-            SKIN_REPO.refresh()
-            refreshLists()
             SFX.play('rotate')
-            MES.new('info', "Refreshed skin library")
+            MES.new('info', "Looking for skins on server...")
+            SKIN_REPO.refresh(function(connected, count)
+                refreshLists()
+                if connected then
+                    MES.new('check', ("Found %d skins on server"):format(count or 0))
+                else
+                    MES.new('warn', "Could not reach gameserver")
+                end
+            end)
+            refreshLists()
             return
         end
 
@@ -389,16 +407,58 @@ function scene.mouseDown(x, y)
             end
         end
 
-        -- If online list is empty, check click on Connect & Retry button
+        -- If online list is empty, check clicks on empty state buttons
         if #onlineList == 0 and not SKIN_REPO.loading then
-            local btnW, btnH = 220, 44
-            local btnX = 40 + (710 - btnW) * 0.5
-            local btnY = 135 + 160
-            if x >= btnX and x <= btnX + btnW and y >= btnY and y <= btnY + btnH then
-                SFX.play('click')
-                SKIN_REPO.refresh()
-                refreshLists()
-                return
+            local listX, listY, listW = 40, 135, 710
+            if not SKIN_REPO.connected then
+                local btnW, btnH = 200, 42
+                local btnX = listX + (listW - btnW) * 0.5 - 110
+                local btnY = listY + 145
+                if x >= btnX and x <= btnX + btnW and y >= btnY and y <= btnY + btnH then
+                    SFX.play('click')
+                    MES.new('info', "Connecting to gameserver...")
+                    SKIN_REPO.refresh(function(connected, count)
+                        refreshLists()
+                        if connected then
+                            MES.new('check', ("Connected! %d skins available"):format(count or 0))
+                        else
+                            MES.new('warn', "Connection failed")
+                        end
+                    end)
+                    refreshLists()
+                    return
+                end
+                local btn2X = listX + (listW - btnW) * 0.5 + 110
+                if x >= btn2X and x <= btn2X + btnW and y >= btnY and y <= btnY + btnH then
+                    setTab('installed')
+                    SFX.play('click')
+                    return
+                end
+            else
+                local bW, bH = 190, 42
+                local startBX = listX + (listW - (bW * 3 + 24)) * 0.5
+                local bY = listY + 180
+                local b1X = startBX
+                local b2X = b1X + bW + 12
+                local b3X = b2X + bW + 12
+                if y >= bY and y <= bY + bH then
+                    if x >= b1X and x <= b1X + bW then
+                        setTab('installed')
+                        SFX.play('click')
+                        return
+                    elseif x >= b2X and x <= b2X + bW then
+                        setTab('publish')
+                        SFX.play('click')
+                        return
+                    elseif x >= b3X and x <= b3X + bW then
+                        love.filesystem.createDirectory('skins')
+                        local saveDir = love.filesystem.getSaveDirectory() .. '/skins'
+                        love.system.openURL("file://" .. saveDir)
+                        SFX.play('click')
+                        MES.new('info', "Opened skins folder")
+                        return
+                    end
+                end
             end
         end
 
@@ -479,6 +539,16 @@ function scene.mouseDown(x, y)
 
             -- Secondary Button: Color Settings (x=1015..1230)
             if x >= 1015 and x <= 1230 then
+                SCN.go('setting_skin')
+                return
+            end
+        elseif not curItem and y >= 620 and y <= 675 then
+            local prevX = 770
+            if x >= prevX + 15 and x <= prevX + 240 then
+                setTab('installed')
+                SFX.play('click')
+                return
+            elseif x >= prevX + 250 and x <= prevX + 455 then
                 SCN.go('setting_skin')
                 return
             end
@@ -653,7 +723,7 @@ end
 -- ════════════════════════════════════════════════════════════
 function scene.draw()
     local t = TIME()
-    local mx, my = love.mouse.getPosition()
+    local mx, my = SCR.xOy:inverseTransformPoint(love.mouse.getPosition())
 
     -- ── 1. Top Header Bar ────────────────────────────────────
     GC.setColor(.04, .06, .14, .95)
@@ -799,15 +869,15 @@ function scene.draw()
             elseif not SKIN_REPO.connected then
                 GC.setColor(.95, .45, .50, .95)
                 setFont(18)
-                GC.mStr("Not Connected to Gameserver", listX + listW * 0.5, listY + 95)
+                GC.mStr("Gameserver Offline or Unreachable", listX + listW * 0.5, listY + 80)
                 GC.setColor(.65, .75, .90, .8)
                 setFont(13)
-                GC.mStr("Skins are loaded directly from the Teblocks server.", listX + listW * 0.5, listY + 125)
+                GC.mStr("Could not retrieve remote skins (" .. (SKIN_REPO.lastError or "Connection timed out") .. ")", listX + listW * 0.5, listY + 110)
 
                 -- Retry button
-                local btnW, btnH = 220, 44
-                local btnX = listX + (listW - btnW) * 0.5
-                local btnY = listY + 160
+                local btnW, btnH = 200, 42
+                local btnX = listX + (listW - btnW) * 0.5 - 110
+                local btnY = listY + 145
                 local isHovBtn = (mx >= btnX and mx <= btnX + btnW and my >= btnY and my <= btnY + btnH)
                 GC.setColor(isHovBtn and .22 or .14, isHovBtn and .50 or .32, isHovBtn and .95 or .75, .9)
                 GC.rectangle('fill', btnX, btnY, btnW, btnH, 6)
@@ -816,11 +886,80 @@ function scene.draw()
                 GC.rectangle('line', btnX, btnY, btnW, btnH, 6)
                 GC.setColor(1, 1, 1, 1)
                 setFont(14)
-                GC.mStr("🔄 Connect & Retry", btnX + btnW * 0.5, btnY + 12)
+                GC.mStr("🔄 Connect & Retry", btnX + btnW * 0.5, btnY + 11)
+
+                -- View Installed button
+                local btn2X = listX + (listW - btnW) * 0.5 + 110
+                local isHovBtn2 = (mx >= btn2X and mx <= btn2X + btnW and my >= btnY and my <= btnY + btnH)
+                GC.setColor(isHovBtn2 and .20 or .12, isHovBtn2 and .30 or .18, isHovBtn2 and .60 or .38, .85)
+                GC.rectangle('fill', btn2X, btnY, btnW, btnH, 6)
+                GC.setColor(.45, .65, .95, .8)
+                GC.setLineWidth(1)
+                GC.rectangle('line', btn2X, btnY, btnW, btnH, 6)
+                GC.setColor(1, 1, 1, 1)
+                setFont(14)
+                GC.mStr("📦 View Installed", btn2X + btnW * 0.5, btnY + 11)
             else
-                GC.setColor(.5, .6, .8, .7)
-                setFont(16)
-                GC.mStr("No community skins found on server", listX + listW * 0.5, listY + 120)
+                -- Connected, but 0 skins match filter or search
+                local statW, statH = 260, 32
+                local statX = listX + (listW - statW) * 0.5
+                local statY = listY + 45
+                GC.setColor(.08, .28, .16, .85)
+                GC.rectangle('fill', statX, statY, statW, statH, 16)
+                GC.setColor(.30, .85, .45, .9)
+                GC.setLineWidth(1)
+                GC.rectangle('line', statX, statY, statW, statH, 16)
+                GC.setColor(.35, 1, .55, 1)
+                setFont(12)
+                GC.mStr("● Connected to Teblocks Server", statX + statW * 0.5, statY + 8)
+
+                GC.setColor(1, 1, 1, .95)
+                setFont(18)
+                GC.mStr("No Community Skins Found", listX + listW * 0.5, listY + 100)
+                GC.setColor(.65, .75, .90, .8)
+                setFont(13)
+                GC.mStr("Be the first to publish a custom mino skin!", listX + listW * 0.5, listY + 130)
+
+                -- 3 Quick Action buttons
+                local bW, bH = 190, 42
+                local startBX = listX + (listW - (bW * 3 + 24)) * 0.5
+                local bY = listY + 180
+
+                -- 1. View Installed Skins
+                local b1X = startBX
+                local isHov1 = (mx >= b1X and mx <= b1X + bW and my >= bY and my <= bY + bH)
+                GC.setColor(isHov1 and .22 or .12, isHov1 and .45 or .26, isHov1 and .85 or .55, .9)
+                GC.rectangle('fill', b1X, bY, bW, bH, 6)
+                GC.setColor(.45, .75, 1, 1)
+                GC.setLineWidth(1)
+                GC.rectangle('line', b1X, bY, bW, bH, 6)
+                GC.setColor(1, 1, 1, 1)
+                setFont(13)
+                GC.mStr("📦 Installed Skins", b1X + bW * 0.5, bY + 12)
+
+                -- 2. Publish Custom
+                local b2X = b1X + bW + 12
+                local isHov2 = (mx >= b2X and mx <= b2X + bW and my >= bY and my <= bY + bH)
+                GC.setColor(isHov2 and .30 or .16, isHov2 and .55 or .35, isHov2 and 1 or .75, .9)
+                GC.rectangle('fill', b2X, bY, bW, bH, 6)
+                GC.setColor(.65, .85, 1, 1)
+                GC.setLineWidth(1)
+                GC.rectangle('line', b2X, bY, bW, bH, 6)
+                GC.setColor(1, 1, 1, 1)
+                setFont(13)
+                GC.mStr("📤 Publish Custom", b2X + bW * 0.5, bY + 12)
+
+                -- 3. Open Skins Folder
+                local b3X = b2X + bW + 12
+                local isHov3 = (mx >= b3X and mx <= b3X + bW and my >= bY and my <= bY + bH)
+                GC.setColor(isHov3 and .20 or .12, isHov3 and .30 or .18, isHov3 and .60 or .38, .85)
+                GC.rectangle('fill', b3X, bY, bW, bH, 6)
+                GC.setColor(.45, .65, .95, .8)
+                GC.setLineWidth(1)
+                GC.rectangle('line', b3X, bY, bW, bH, 6)
+                GC.setColor(1, 1, 1, 1)
+                setFont(13)
+                GC.mStr("📁 Open Folder", b3X + bW * 0.5, bY + 12)
             end
         end
 
@@ -1017,12 +1156,75 @@ function scene.draw()
             setFont(14)
             GC.mStr("🎨 Color Settings", prevX + 352, prevY + prevH - 44)
         else
-            GC.setColor(.55, .65, .85, .6)
-            setFont(18)
-            GC.mStr("No Skin Selected", prevX + prevW * 0.5, prevY + prevH * 0.5 - 20)
-            GC.setColor(.45, .55, .75, .5)
+            -- Live preview of the currently equipped skin
+            local eqSkin = SETTING.skinSet or 'Neon Cyber (Teblocks)'
+            local isUser = (eqSkin:sub(1, 7) == '[User] ')
+            local dispName = isUser and eqSkin:sub(8) or eqSkin
+
+            -- Header Banner
+            GC.setColor(1, 1, 1, .98)
+            setFont(22)
+            GC.print(dispName, prevX + 22, prevY + 18)
+
+            GC.setColor(.45, .78, 1, .95)
             setFont(13)
-            GC.mStr("Connect to gameserver to load and preview community skins", prevX + prevW * 0.5, prevY + prevH * 0.5 + 12)
+            GC.print("Currently Equipped Skin (" .. (isUser and "Custom User Skin" or "Built-in Preset") .. ")", prevX + 22, prevY + 48)
+
+            GC.setColor(.65, .75, .92, .80)
+            setFont(11)
+            GC.printf("This skin is currently equipped and active in your offline and multiplayer matches.", prevX + 22, prevY + 70, prevW - 44)
+
+            -- Live 7 Tetromino Showcase
+            GC.setColor(.35, .55, .90, .4)
+            GC.line(prevX + 20, prevY + 122, prevX + prevW - 20, prevY + 122)
+
+            GC.setColor(.75, .88, 1, .9)
+            setFont(13)
+            GC.print("Live Mino Preview (7 Tetrominoes):", prevX + 22, prevY + 132)
+
+            drawTetrominoRow(nil, eqSkin, prevX + 24, prevY + 160, 0.95, t)
+
+            -- 24 Palette Block Tiles Grid
+            local palY = prevY + 365
+            GC.setColor(.35, .55, .90, .4)
+            GC.line(prevX + 20, palY - 8, prevX + prevW - 20, palY - 8)
+
+            GC.setColor(.75, .88, 1, .9)
+            setFont(13)
+            GC.print("Complete 24-Tile Palette Sheet (240×90 RGBA):", prevX + 22, palY)
+
+            for row = 0, 2 do
+                for col = 1, 8 do
+                    local bIdx = row * 8 + col
+                    local px = prevX + 22 + (col - 1) * 52
+                    local py = palY + 22 + row * 44
+                    drawMinoTile(nil, eqSkin, bIdx, px, py, 1.2)
+                    GC.setColor(.25, .35, .60, .5)
+                    GC.setLineWidth(1)
+                    GC.rectangle('line', px, py, 36, 36, 2)
+                end
+            end
+
+            -- Bottom Action Buttons
+            local isHovBtn1 = (mx >= prevX + 15 and mx <= prevX + 240 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
+            GC.setColor(isHovBtn1 and .22 or .14, isHovBtn1 and .45 or .28, isHovBtn1 and .85 or .58, .9)
+            GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+            GC.setColor(.45, .75, 1, 1)
+            GC.setLineWidth(1.5)
+            GC.rectangle('line', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+            GC.setColor(1, 1, 1, 1)
+            setFont(15)
+            GC.mStr("📦 Installed Skins", prevX + 127, prevY + prevH - 44)
+
+            local isHovCol = (mx >= prevX + 250 and mx <= prevX + prevW - 15 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
+            GC.setColor(isHovCol and .22 or .12, isHovCol and .28 or .16, isHovCol and .55 or .35, .85)
+            GC.rectangle('fill', prevX + 250, prevY + prevH - 58, 205, 46, 6)
+            GC.setColor(.45, .60, .95, .8)
+            GC.setLineWidth(1)
+            GC.rectangle('line', prevX + 250, prevY + prevH - 58, 205, 46, 6)
+            GC.setColor(.90, .94, 1, 1)
+            setFont(14)
+            GC.mStr("🎨 Color Settings", prevX + 352, prevY + prevH - 44)
         end
     end
 

@@ -1,29 +1,48 @@
 local JSON = JSON
 local HTTP = HTTP
 
+local OFFICIAL_SKIN = {
+    id = 'neon_cyber',
+    title = 'Neon Cyber (Teblocks)',
+    name = 'Neon Cyber (Teblocks)',
+    author = 'Teblocks Team',
+    username = 'Teblocks Team',
+    description = 'Official high-contrast cyber mino skin for competitive Teblocks play.',
+    tags = {'official', 'cyber', 'teblocks', 'neon'},
+    likes = 128,
+    downloads = 1024,
+    rating = 5.0,
+    isOfficial = true,
+    installedName = 'Neon Cyber (Teblocks)',
+    filename = 'media/image/skin/teblocks/neon_cyber.png',
+}
+
 local SKIN_REPO = {
-    onlineList = {},
+    onlineList = { OFFICIAL_SKIN },
     filter = 'all', -- 'all', 'popular', 'latest', 'top_rated'
     searchQuery = '',
     loading = false,
     connected = false,
     lastError = nil,
     previewImages = {},
+    version = 0,
 }
 
 function SKIN_REPO.init()
     SKIN_REPO.refresh()
 end
 
-function SKIN_REPO.refresh()
-    SKIN_REPO.fetchRemote()
+function SKIN_REPO.refresh(cb)
+    SKIN_REPO.fetchRemote(cb)
 end
 
 -- Query remote gameserver backend for available community skins
-function SKIN_REPO.fetchRemote()
+function SKIN_REPO.fetchRemote(cb)
     if not HTTP or not AUTHHOST then
         SKIN_REPO.connected = false
-        SKIN_REPO.onlineList = {}
+        SKIN_REPO.onlineList = { OFFICIAL_SKIN }
+        SKIN_REPO.version = (SKIN_REPO.version or 0) + 1
+        if cb then cb(false, 0) end
         return
     end
 
@@ -35,7 +54,7 @@ function SKIN_REPO.fetchRemote()
         HTTP.request({
             pool = pool,
             url = AUTHHOST,
-            path = '/api/skins',
+            path = '/skins',
         })
 
         local timer = 0
@@ -47,16 +66,34 @@ function SKIN_REPO.fetchRemote()
                     local ok, data = pcall(JSON.decode, msg.body)
                     if ok and type(data) == 'table' then
                         local list = data.skins or (data.data and data.data.skins) or (data.data and type(data.data) == 'table' and data.data) or {}
-                        SKIN_REPO.onlineList = list
+                        local norm = { OFFICIAL_SKIN }
+                        for _, it in ipairs(list) do
+                            if it.id ~= 'neon_cyber' and (it.name or it.title) ~= 'Neon Cyber (Teblocks)' then
+                                table.insert(norm, {
+                                    id = it.id,
+                                    title = it.name or it.title or "Untitled Skin",
+                                    name = it.name or it.title or "Untitled Skin",
+                                    author = it.username or it.author or "Anonymous",
+                                    username = it.username or it.author or "Anonymous",
+                                    description = it.description or "",
+                                    tags = it.tags or {},
+                                    likes = it.likes or 0,
+                                    downloads = it.downloads or 0,
+                                    installedName = it.name or it.title or "CustomSkin",
+                                    downloadUrl = it.url and (AUTHHOST and ('http://' .. AUTHHOST .. it.url)) or (AUTHHOST and ('http://' .. AUTHHOST .. '/skins/' .. it.id .. '/download')),
+                                })
+                            end
+                        end
+                        SKIN_REPO.onlineList = norm
                         SKIN_REPO.connected = true
                         received = true
                     else
-                        SKIN_REPO.onlineList = {}
+                        SKIN_REPO.onlineList = { OFFICIAL_SKIN }
                         SKIN_REPO.connected = false
                         SKIN_REPO.lastError = "Invalid server response"
                     end
                 else
-                    SKIN_REPO.onlineList = {}
+                    SKIN_REPO.onlineList = { OFFICIAL_SKIN }
                     SKIN_REPO.connected = false
                     SKIN_REPO.lastError = "Gameserver unavailable"
                 end
@@ -66,13 +103,15 @@ function SKIN_REPO.fetchRemote()
         end
 
         if not received and timer >= 5.0 then
-            SKIN_REPO.onlineList = {}
+            SKIN_REPO.onlineList = { OFFICIAL_SKIN }
             SKIN_REPO.connected = false
             SKIN_REPO.lastError = "Connection timed out"
         end
 
+        SKIN_REPO.version = (SKIN_REPO.version or 0) + 1
         SKIN_REPO.loading = false
         HTTP.deletePool(pool)
+        if cb then cb(SKIN_REPO.connected, #SKIN_REPO.onlineList) end
     end)
 end
 
@@ -104,7 +143,10 @@ function SKIN_REPO.getPreviewImage(item)
     end
 
     local img = nil
-    if item.filename and love.filesystem.getInfo('skins/' .. item.filename) then
+    if item.filename and love.filesystem.getInfo(item.filename) then
+        local ok, loaded = pcall(love.graphics.newImage, item.filename)
+        if ok and loaded then img = loaded end
+    elseif item.filename and love.filesystem.getInfo('skins/' .. item.filename) then
         local ok, loaded = pcall(love.graphics.newImage, 'skins/' .. item.filename)
         if ok and loaded then img = loaded end
     end
@@ -149,7 +191,7 @@ function SKIN_REPO.download(item, onComplete)
     end
 
     -- URL download from server
-    local downloadUrl = item.downloadUrl or (AUTHHOST and ('http://' .. AUTHHOST .. '/api/skins/' .. item.id .. '/download'))
+    local downloadUrl = item.downloadUrl or (AUTHHOST and ('http://' .. AUTHHOST .. '/skins/' .. item.id .. '/download'))
     if downloadUrl and HTTP then
         TASK.new(function()
             local pool = 'skin_download_' .. tostring(item.id)
@@ -236,7 +278,7 @@ function SKIN_REPO.upload(rawName, meta, onComplete)
         HTTP.request({
             pool = pool,
             url = AUTHHOST,
-            path = '/api/skins/upload',
+            path = '/skins/upload',
             headers = headers,
             body = {
                 title       = meta.title or rawName,
@@ -277,9 +319,15 @@ function SKIN_REPO.getFilteredList()
     for _, item in ipairs(SKIN_REPO.onlineList) do
         local matchesQuery = true
         if #query > 0 then
+            local tagStr = ""
+            if type(item.tags) == 'table' then
+                tagStr = table.concat(item.tags, " ")
+            else
+                tagStr = tostring(item.tags or "")
+            end
             local textMatch = ((item.title or ''):lower():find(query, 1, true) ~= nil) or
                               ((item.author or ''):lower():find(query, 1, true) ~= nil) or
-                              ((item.tags or ''):lower():find(query, 1, true) ~= nil) or
+                              (tagStr:lower():find(query, 1, true) ~= nil) or
                               ((item.description or ''):lower():find(query, 1, true) ~= nil)
             matchesQuery = textMatch
         end

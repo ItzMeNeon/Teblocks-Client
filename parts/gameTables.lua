@@ -621,6 +621,7 @@ do-- Userdata tables
         fine=false,
         autoSave=false,
         simpMode=false,
+        uiScale=1.0,
         sysCursor=true,
         maxFPS=60,
         frameMul=100,

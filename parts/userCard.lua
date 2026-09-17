@@ -16,6 +16,8 @@ local LOBBY=require'parts.lobbyPanel'
 
 CARD.w=310
 CARD.h=120
+CARD.x=nil
+CARD.y=nil
 CARD.slideX=320
 CARD.alpha=0
 CARD.open=false
@@ -28,6 +30,12 @@ CARD.nameWidth=0
 CARD.nameOffY=0
 
 local menuItems={}
+
+function CARD.getPos()
+    local x=(CARD.x or (1280-CARD.w-10))+CARD.slideX
+    local y=CARD.y or 10
+    return x,y
+end
 
 function CARD.reset()
     CARD.playerName=""
@@ -54,7 +62,7 @@ end
 
 function CARD.update(dt)
     -- The card is hidden (slid out and faded) while the global chat panel is open
-    local cardVisible = CARD.open and not (LOBBY.chat and LOBBY.chat.visible)
+    local cardVisible = CARD.open and not (LOBBY and LOBBY.chat and LOBBY.chat.visible)
     local targetX = cardVisible and 0 or CARD.w
     CARD.slideX=approach(CARD.slideX,targetX,dt*12)
     if cardVisible then
@@ -71,17 +79,17 @@ end
 
 function CARD._isCardAbove(mx,my)
     if CARD.alpha<0.5 then return false end
-    local cardX=1280-CARD.w-10+CARD.slideX
-    return mx>=cardX and mx<=cardX+CARD.w and my>=10 and my<=10+CARD.h
+    local cardX,cardY=CARD.getPos()
+    return mx>=cardX and mx<=cardX+CARD.w and my>=cardY and my<=cardY+CARD.h
 end
 
 function CARD.mouseClick(x,y)
-    local cardX=1280-CARD.w-10+CARD.slideX
+    local cardX,cardY=CARD.getPos()
     if CARD.menuAlpha>0 and CARD.menu then
         local menuW=180
         local menuH=#menuItems*50+16
-        local menuX=1280-menuW-10+CARD.slideX
-        local menuY=CARD.h+10+10
+        local menuX=cardX+CARD.w-menuW
+        local menuY=cardY+CARD.h+10
         if x>=menuX and x<=menuX+menuW and y>=menuY and y<=menuY+menuH then
             for i,item in ipairs(menuItems) do
                 local iy=menuY+8+(i-1)*50
@@ -111,20 +119,39 @@ end
 function CARD.openMenu()
     CARD.menu=true
     menuItems={}
+    local baseWeb=(AUTHURL and AUTHURL:find("^http")) and AUTHURL or "https://teblocks.my.id"
     if USER.uid then
-        table.insert(menuItems,{label="Profile",url="https://teblocks.my.id/profile"})
-        table.insert(menuItems,{label="Match History",url="https://teblocks.my.id/history"})
-        table.insert(menuItems,{label="Settings",code=function() SCN.go('setting_game') end})
+        table.insert(menuItems,{label="Profile",url=baseWeb.."/profile"})
+        table.insert(menuItems,{label="Match History",url=baseWeb.."/history"})
+        table.insert(menuItems,{label="Skin Direct",code=function() SCN.go('skin_browse') end})
         table.insert(menuItems,{label="Log Out",code=function()
             USER.__data.uid=false
             USER.__data.aToken=false
             USER.__data.oToken=false
             love.filesystem.remove('conf/user')
-            SCN.backTo('main')
+            STAT.elo=nil
+            STAT.globalRank=nil
+            NET.ws_close()
+            CARD.reset()
+            MES.new('info',"Logged out")
+            if SCN.cur~='main' then
+                SCN.backTo('main')
+            else
+                NET.ws_connect()
+            end
         end})
     else
+        local REG_CONFIRM = require 'parts.registerConfirmModal'
         table.insert(menuItems,{label="Log In",code=function() AUTH.open('login') end})
-        table.insert(menuItems,{label="Register",url="https://teblocks.my.id/register"})
+        table.insert(menuItems,{label="Register",code=function() REG_CONFIRM.open() end})
+        table.insert(menuItems,{label="Skin Direct",code=function()
+            if not (USER and USER.uid and USER.uid ~= false) then
+                MES.new('warn', "Please log in to access Skin Direct")
+                AUTH.open('login')
+            else
+                SCN.go('skin_browse')
+            end
+        end})
     end
 end
 
@@ -147,8 +174,7 @@ end
 function CARD.draw()
     if CARD.alpha<=0 and CARD.menuAlpha<=0 then return end
 
-    local cardX=1280-CARD.w-10+CARD.slideX
-    local cardY=10
+    local cardX,cardY=CARD.getPos()
 
     if CARD.alpha>0 then
         gc_push('transform')
@@ -164,7 +190,7 @@ function CARD.draw()
             gc_rectangle('line',cardX+CARD.w-106,cardY+12,96,96,3)
 
             local isGuest = not USER.uid
-            local avatar = isGuest and nil or USERS.getAvatar(USER.uid)
+            local avatar = isGuest and USERS.getAvatar(nil) or USERS.getAvatar(USER.uid)
             if avatar then
                 local avatarBoxX,avatarBoxY,avatarBoxSize=cardX+CARD.w-106,cardY+12,96
                 local aw,ah=avatar:getDimensions()
@@ -198,14 +224,21 @@ function CARD.draw()
 
             -- Rank and ELO
             setFont(16)
-            local rank = isGuest and 0 or (STAT.globalRank or 0)
-            local rankStr = rank > 0 and ("#"..rank) or "Unranked"
-            gc_setColor(COLOR.lH[1],COLOR.lH[2],COLOR.lH[3],CARD.alpha)
-            gc_print(text.globalRank.." "..rankStr,cardX+16,cardY+48)
+            if isGuest then
+                gc_setColor(COLOR.lH[1],COLOR.lH[2],COLOR.lH[3],CARD.alpha*.85)
+                gc_print("Guest Account",cardX+16,cardY+48)
+                gc_setColor(COLOR.lY[1],COLOR.lY[2],COLOR.lY[3],CARD.alpha*.85)
+                gc_print("Click to Log In",cardX+16,cardY+70)
+            else
+                local rank = STAT.globalRank or 0
+                local rankStr = rank > 0 and ("#"..rank) or "Unranked"
+                gc_setColor(COLOR.lH[1],COLOR.lH[2],COLOR.lH[3],CARD.alpha)
+                gc_print(text.globalRank.." "..rankStr,cardX+16,cardY+48)
 
-            local elo = isGuest and 0 or (STAT.elo or 1200)
-            gc_setColor(COLOR.lY[1],COLOR.lY[2],COLOR.lY[3],CARD.alpha)
-            gc_print(text.elo.." "..elo,cardX+16,cardY+70)
+                local elo = STAT.elo or 1200
+                gc_setColor(COLOR.lY[1],COLOR.lY[2],COLOR.lY[3],CARD.alpha)
+                gc_print(text.elo.." "..elo,cardX+16,cardY+70)
+            end
         gc_pop()
     end
 
@@ -215,8 +248,8 @@ function CARD.draw()
         gc_replaceTransform(SCR.xOy)
         local menuW=180
         local menuH=#menuItems*50+16
-        local menuX=1280-menuW-10+CARD.slideX
-        local menuY=CARD.h+10+10
+        local menuX=cardX+CARD.w-menuW
+        local menuY=cardY+CARD.h+10
 
         gc_setColor(.1,.1,.1,.95*CARD.menuAlpha)
         gc_rectangle('fill',menuX,menuY,menuW,menuH,4)

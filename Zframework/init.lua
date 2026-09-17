@@ -246,6 +246,7 @@ end
 function love.mousepressed(x,y,k,touch)
     if touch or WAIT.state then return end
     mouseShow=true
+    if MES.mouseDown and MES.mouseDown(x,y,k) then return end
     mx,my=ITP(xOy,x,y)
     if debugMode==1 then
         print(("(%d,%d)<-%d,%d ~~(%d,%d)<-%d,%d"):format(
@@ -264,11 +265,13 @@ end
 function love.mousemoved(x,y,dx,dy,touch)
     if touch then return end
     mouseShow=true
+    if MES.mouseMove then MES.mouseMove(x,y,dx,dy) end
     mx,my=ITP(xOy,x,y)
     _updateMousePos(mx,my,dx,dy)
 end
 function love.mousereleased(x,y,k,touch)
     if touch or WAIT.state or SCN.swapping then return end
+    if MES.mouseUp and MES.mouseUp(x,y,k) then return end
     mx,my=ITP(xOy,x,y)
     if SCN.mouseUp then SCN.mouseUp(mx,my,k) end
     if WIDGET.sel then
