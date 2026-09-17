@@ -14,6 +14,12 @@ local SFX,BGM,VOC,VIB,SYSFX=SFX,BGM,VOC,VIB,SYSFX
 local LINE,TABLE,TEXT,TASK=LINE,TABLE,TEXT,TASK
 local PLAYERS,PLY_ALIVE,GAME=PLAYERS,PLY_ALIVE,GAME
 
+local _prof={
+    attacks=0,
+    streamCalls=0,
+    streamExtraEvents=0,
+}
+
 local SETTING=SETTING
 
 -- dump_state: dev/TEST ONLY golden-harness hook. No-op unless the launch
@@ -577,6 +583,11 @@ local playerActions={
         -- us from authority, not client/server plumbing.
         if NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked' then
             NET._pushInput(self.frameRun,keyID,false)
+            -- Flush immediately so the server's authoritative sim sees this
+            -- input on its next tick instead of waiting for the next frame's
+            -- update loop to batch it. This removes ~1 frame (16.6ms) of
+            -- input-to-opponent latency from the ranked input path.
+            NET.flushInputs()
         end
     end
     if self.keyAvailable[keyID] and self.alive then
@@ -601,6 +612,7 @@ function Player:releaseKey(keyID)
         end
         if NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked' then
             NET._pushInput(self.frameRun,keyID,true)
+            NET.flushInputs()
         end
     end
     self.keyPressing[keyID]=false
@@ -931,6 +943,7 @@ function Player:ifoverlap(bk,x,y)
     end
 end
 function Player:attack(R,send,time,line)
+    _prof.attacks=_prof.attacks+1
     local sid=R.sid
     if self.streamProgress then return end
     -- Add the attack to the list of in-transit attacks.
@@ -969,7 +982,14 @@ function Player:attack(R,send,time,line)
         -- (non-remote) target, extraEvent already delivered the attack via
         -- beAttacked above, so applying it again here would send the trash
         -- twice.
-        if R.type=='remote' then
+        --
+        -- EXCEPT in ranked rooms: there the opponent is driven entirely by
+        -- server 1410 snapshots (see snapshot.applyServerState). Mirroring the
+        -- attack locally would double-apply garbage once the snapshot arrives
+        -- (the server has already applied it authoritatively), so we skip the
+        -- local mirror and let the snapshot deliver the garbage.
+        local isRanked=NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked'
+        if R.type=='remote' and not isRanked then
             R:receive(self,send,time,line)
         end
     end
@@ -2920,8 +2940,9 @@ local function update_alive(P,dt)
     _updateMisc(P,dt)
 end
 local function update_streaming(P)
+    _prof.streamCalls=_prof.streamCalls+1
     local eventTime=P.stream[P.streamProgress]
-    while eventTime and P.frameRun==eventTime or eventTime==0 do
+    while eventTime and (P.frameRun==eventTime or eventTime==0 or eventTime < P.frameRun) do
         local event=P.stream[P.streamProgress+1]
         if event==0 then-- Just wait
         elseif event<=32 then-- Press key
@@ -2935,7 +2956,8 @@ local function update_streaming(P)
             local paramBase=P.streamProgress+3
             P.streamProgress=P.streamProgress+eventParamCount+1
 
-            if P.sid==sourceSid then
+            if P.sid==sourceSid and (P.type=='remote' or GAME.replaying) then
+                _prof.streamExtraEvents=_prof.streamExtraEvents+1
                 local SRC
                 for _,p in next,PLAYERS do
                     if p.sid==sourceSid then
@@ -2960,12 +2982,21 @@ local function update_streaming(P)
                             P.stream[paramBase+4])
                     end
                 else
-                    local paramList={}
-                    for i=1,eventParamCount do
-                        ins(paramList,P.stream[paramBase+i-1])
-                    end
                     if SRC and subject then
-                        subject.gameEnv.extraEventHandler[eventName](subject,SRC,unpack(paramList))
+                        local p1,p2,p3,p4,p5=P.stream[paramBase],P.stream[paramBase+1],P.stream[paramBase+2],P.stream[paramBase+3],P.stream[paramBase+4]
+                        if eventParamCount==0 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC)
+                        elseif eventParamCount==1 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1)
+                        elseif eventParamCount==2 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1,p2)
+                        elseif eventParamCount==3 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1,p2,p3)
+                        elseif eventParamCount==4 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1,p2,p3,p4)
+                        else
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1,p2,p3,p4,p5)
+                        end
                     end
                 end
             end

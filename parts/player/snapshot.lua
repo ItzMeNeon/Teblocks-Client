@@ -277,4 +277,125 @@ function M.restore(P, s)
     P.modeData=s.modeData
 end
 
+-- M.applyServerState(P, s) — overwrite a Player's board/sim state from a server
+-- 1410 authoritative snapshot entry (the per-player map produced by the Go
+-- sim's SimPlayer.StateJSON()). This is the snapshot-driven opponent path:
+-- instead of replaying the legacy player_stream and letting the remote player
+-- re-simulate with a catch-up throttle (which caused visible timer stutter),
+-- the opponent's board is written verbatim from the server's authoritative
+-- state at the snapshot's frameRun.
+--
+-- `s` shape (see snapshot.go StateJSON / statJSON):
+--   { uid, sid, frameRun, alive, result, control, timing,
+--     field=[[...]], garbage=[bool,...], garbageBeneath, fieldBeneath, fieldUp,
+--     cur={id,dir,x,y} or nil, curX, curY, ghoY, dropDelay, lockDelay,
+--     waiting, falling, combo, b2b, pieceCount,
+--     nextQueue=[{id,dir,color}], holdQueue=[...], holdTime,
+--     atkBuffer=[{amount,countdown,sent,line,lv}], atkBufferSum, stat={...} }
+function M.applyServerState(P, s)
+    if not P or not s then return end
+
+    P.frameRun = s.frameRun or P.frameRun
+    if s.alive ~= nil then P.alive = s.alive end
+    if s.result ~= nil then P.result = s.result end
+    if s.control ~= nil then P.control = s.control end
+    if s.timing ~= nil then P.timing = s.timing end
+
+    -- Board: rebuild field + visTime rows from the server's bottom-up rows.
+    if type(s.field)=='table' then
+        -- Discard existing rows to avoid leaking pooled LINE objects.
+        for y=#P.field,1,-1 do
+            if P.field[y] then LINE.discard(P.field[y]) end
+            if P.visTime[y] then LINE.discard(P.visTime[y]) end
+            P.field[y]=nil
+            P.visTime[y]=nil
+        end
+        local showTime = P.showTime or 20
+        for y=1,#s.field do
+            local row = s.field[y]
+            local fr = LINE.new(0)
+            for x=1,10 do fr[x] = row[x] or 0 end
+            local isGarbage = s.garbage and s.garbage[y]
+            fr.garbage = isGarbage==true
+            P.field[y] = fr
+            P.visTime[y] = LINE.new(showTime)
+        end
+    end
+    P.garbageBeneath = s.garbageBeneath or P.garbageBeneath
+    P.fieldBeneath = s.fieldBeneath or P.fieldBeneath
+    P.fieldUp = s.fieldUp or P.fieldUp
+
+    -- Active piece position.
+    P.curX = s.curX or P.curX
+    P.curY = s.curY or P.curY
+    if s.ghoY ~= nil then P.ghoY = s.ghoY end
+    if s.dropDelay ~= nil then P.dropDelay = s.dropDelay end
+    if s.lockDelay ~= nil then P.lockDelay = s.lockDelay end
+    if s.waiting ~= nil then P.waiting = s.waiting end
+    if s.falling ~= nil then P.falling = s.falling end
+
+    -- Active piece object: rebuild from id/dir so `bk`/`color` are consistent.
+    if s.cur and s.cur.id then
+        local c = s.cur
+        P.cur = P:_getBlock(c.id, nil, c.color)
+        P.cur.dir = c.dir or P.cur.dir
+        P.cur.bk = BLOCKS[c.id][c.dir or 0]
+    elseif s.cur == nil then
+        P.cur = nil
+    end
+
+    P.combo = s.combo or P.combo
+    if s.b2b ~= nil then P.b2b = s.b2b end
+    P.pieceCount = s.pieceCount or P.pieceCount
+
+    -- Queues: rebuild blocks so next/hold previews render correctly.
+    if type(s.nextQueue)=='table' then
+        P.nextQueue = {}
+        for i=1,#s.nextQueue do
+            local q = s.nextQueue[i]
+            local blk = P:_getBlock(q.id, nil, q.color)
+            blk.dir = q.dir or blk.dir
+            blk.bk = BLOCKS[q.id][q.dir or 0]
+            P.nextQueue[i] = blk
+        end
+    end
+    if type(s.holdQueue)=='table' then
+        P.holdQueue = {}
+        for i=1,#s.holdQueue do
+            local q = s.holdQueue[i]
+            local blk = P:_getBlock(q.id, nil, q.color)
+            blk.dir = q.dir or blk.dir
+            blk.bk = BLOCKS[q.id][q.dir or 0]
+            P.holdQueue[i] = blk
+        end
+    end
+    if s.holdTime ~= nil then P.holdTime = s.holdTime end
+
+    -- Attack buffer: {amount, countdown, sent, line, lv}.
+    if type(s.atkBuffer)=='table' then
+        P.atkBuffer = {}
+        for i=1,#s.atkBuffer do
+            local a = s.atkBuffer[i]
+            P.atkBuffer[i] = {
+                amount    = a.amount or 0,
+                countdown = a.countdown or 0,
+                sent      = a.sent == true,
+                line      = a.line or 0,
+                lv        = a.lv or 0,
+            }
+        end
+    end
+    P.atkBufferSum = s.atkBufferSum or P.atkBufferSum
+
+    -- Scoring stat (subset carried by the server).
+    if type(s.stat)=='table' then
+        local st = P.stat
+        for k,v in next,s.stat do
+            if k~='clear' and k~='clears' and k~='spin' and k~='spins' then
+                st[k] = v
+            end
+        end
+    end
+end
+
 return M

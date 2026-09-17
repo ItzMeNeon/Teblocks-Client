@@ -1,7 +1,7 @@
 return {
     ["apkCode"]=1722,
     ["code"]=1722,
-    ["string"]="v0.9.1",
-    ["room"]="v0.5.1-GameServerUpstream",
+    ["string"]="v0.9.2",
+    ["room"]="v0.6.1-GameServerUpstream",
     ["name"]="Beta",
 }

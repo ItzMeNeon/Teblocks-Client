@@ -426,7 +426,9 @@ function scene.update(dt)
                 checkWarning(P1,dt)
 
                 -- Upload stream
-                if not GAME.replaying and not NET.spectate and P1.frameRun-lastUpstreamTime>8 then
+                local isRanked=NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked'
+                local streamInterval=isRanked and 1 or 8
+                if not GAME.replaying and not NET.spectate and P1.frameRun-lastUpstreamTime>streamInterval then
                     local stream
                     if not GAME.rep[upstreamProgress] then
                         GAME.repAdd(P1.frameRun)
@@ -438,7 +440,13 @@ function scene.update(dt)
                     elseif #stream%3==2 then
                         stream=stream.."\0\0\0\0"
                     end
-                    NET.player_stream(stream)
+                    -- Ranked rooms are snapshot-driven (server 1410): the legacy
+                    -- player_stream replay is not needed and would conflict with
+                    -- the authoritative snapshot path. Skip the stream upload in
+                    -- ranked rooms; the opponent's board comes from snapshots.
+                    if not isRanked then
+                        NET.player_stream(stream)
+                    end
                     -- Flush any queued authoritative-sim inputs (1413) at the
                     -- same cadence as the legacy stream upload. No-op when
                     -- not in a ranked room (NET._inputSubmitBuf stays empty).

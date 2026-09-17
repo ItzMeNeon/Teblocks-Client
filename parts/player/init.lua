@@ -458,7 +458,15 @@ function PLY.newRemotePlayer(id,mini,p)
     P.type='remote'
 
     P.draw=ply_draw.norm
-    P:startStreaming()
+    -- In ranked rooms the opponent is driven purely by server 1410 snapshots
+    -- (snapshot.applyServerState), not the legacy player_stream replay. Leave
+    -- streamProgress=false there so Player:update never enters the catch-up
+    -- throttle path (which caused visible timer stutter). Casual rooms keep
+    -- the legacy stream replay.
+    local isRanked=NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked'
+    if not isRanked then
+        P:startStreaming()
+    end
 
     P.uid=p.uid
     P.sid=NET.uid_sid[p.uid] or p.uid

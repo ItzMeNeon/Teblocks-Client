@@ -171,10 +171,23 @@ end
 
 function M.step(players, dt)
     if not players or #players==0 then return end
-    -- Phase 2: advance both players in lockstep.
+    local ranked = _inRankedRoom()
+    -- Phase 2: advance players in lockstep. In ranked rooms the remote
+    -- (opponent) player is snapshot-driven — it is written by the server's
+    -- 1410 snapshots via applyServerState, NOT locally simulated. Skipping
+    -- its Player:update here prevents it from running the local all-gravity
+    -- sim (which would diverge from the server) and from the bursty stream
+    -- catch-up throttle that caused the timer stutter. Casual rooms keep the
+    -- legacy lockstep for all players.
     for i=1,#players do
         local P=players[i]
-        if P and P.update then P:update(dt) end
+        if P and P.update then
+            if ranked and P.type=='remote' then
+                -- Snapshot-driven: no local step. frameRun is set by snapshots.
+            else
+                P:update(dt)
+            end
+        end
     end
     -- Phase 3: snapshot at the server's snapshot rate (every
     -- SNAPSHOT_INTERVAL frames). We only need enough history to cover
@@ -190,10 +203,12 @@ function M.step(players, dt)
     --
     -- Skipped in casual rooms: snapshots are never consumed there
     -- (no 1410/1412 traffic), so the deep copies are pure overhead.
-    if _inRankedRoom() and players[1] and players[1].frameRun >= M.nextSnapshotFrame then
+    -- Also skipped for remote players in ranked (they are snapshot-driven
+    -- and have no local history to roll back).
+    if ranked and players[1] and players[1].frameRun >= M.nextSnapshotFrame then
         for i=1,#players do
             local P=players[i]
-            if P then M.save(P) end
+            if P and P.type~='remote' then M.save(P) end
         end
         M.nextSnapshotFrame = players[1].frameRun + SNAPSHOT_INTERVAL
     end
@@ -207,61 +222,46 @@ function M.step(players, dt)
     end
 end
 
--- M._reconcile(players, snap) — restore both players to the nearest prior
--- confirmed-frame snapshot, then re-simulate forward to snap.frameRun using
--- confirmed inputs only.
+-- M._reconcile(players, snap) — apply a server 1410 authoritative snapshot.
 --
--- Phase A (restore): for each player, find the nearest snapshot at or before
--- `snap.frameRun` in M.history and restore from it. Same-frame snapshots are
--- preferred (we may have saved right at the snap frame).
+-- The snapshot is the single source of truth for the *opponent* (remote
+-- player): its board is written verbatim from the server's full-state entry
+-- via snapshot.applyServerState. This replaces the legacy player_stream
+-- replay + catch-up throttle that previously advanced the opponent's board
+-- in bursty 1/2/3/5/…-frame steps (the visible timer stutter).
 --
--- Phase B (re-sim): starting from the restored frameRun, call each player's
--- update(dt) once per frame until the players' frameRun reach snap.frameRun.
--- The dt here is informational — update_alive increments frameRun per
--- internal step, and we cap it at one increment per Player:update() call.
+-- The *local* player keeps predicting locally (zero perceived input lag) and
+-- is only reconciled when the server reports divergence (1412) — it is NOT
+-- overwritten by the snapshot, since its local prediction is already ahead of
+-- the server's acked state and overwriting it would rewind the board.
 --
--- Phase C (predict past anchor): once the players are at snap.frameRun and
--- ackFrame has advanced (server confirmed the inputs through that frame),
--- re-apply any local pending inputs from NET._inputSubmitBuf for the local
--- player only — these are inputs the server has not yet acked. The remote
--- player's inputs from this window were included in the server's snapshot
--- already.
---
--- This function is gated behind NET._rollbackEnabled in M.step. Default off.
+-- The snapshot shape: { frameRun, players=[{uid,sid,frameRun,field,cur,
+-- nextQueue,holdQueue,atkBuffer,stat,…}, …] } (see SimPlayer.StateJSON).
 function M._reconcile(players, snap)
-    if not players or not snap or type(snap.frame)~='number' then return end
-    local target=snap.frame
-    -- Phase A: restore both players to the nearest prior confirmed frame.
-    local restoredFrom=target
+    if not players or not snap or not snap.players then return end
+
+    -- Map snapshot entries to live players by uid (fallback: sid).
+    local byUid, bySid = {}, {}
     for i=1,#players do
         local P=players[i]
-        local f=M.restoreTo(P, target)
-        if f and f<restoredFrom then restoredFrom=f end
-        if not f then
-            -- No prior snapshot to restore from. Bail — the buffer is too
-            -- small for the rollback window (typical ack at 8Hz means ~7
-            -- frames between acks; N=12 covers this). The server will retry
-            -- on the next snapshot.
-            return
+        if P and P.uid then byUid[P.uid]=P end
+        if P and P.sid then bySid[P.sid]=P end
+    end
+
+    for i=1,#snap.players do
+        local se = snap.players[i]
+        if not se then break end
+        local P = byUid[se.uid] or bySid[se.sid]
+        if not P then break end
+
+        if P.type=='remote' then
+            -- Opponent: drive directly from the authoritative snapshot.
+            snapshot.applyServerState(P, se)
+        else
+            -- Local player: prediction is authoritative for display; do not
+            -- overwrite. (Divergence correction stays on the 1412 path.)
         end
     end
-    -- Phase B: re-simulate from the restore frame up to the snap frame.
-    -- Each Player:update(dt) call internally advances frameRun by 1 (the
-    -- fixed-step path in update_alive). Step both players in lockstep so
-    -- their frameRun tracks match.
-    while players[1] and players[1].frameRun<target do
-        for i=1,#players do
-            local P=players[i]
-            if P and P.update then P:update(1/60) end
-        end
-    end
-    -- Phase C: predict past the rollback anchor for the local player only.
-    -- The remote player's inputs from this window are already baked into the
-    -- snap state (the server applied them when computing the snapshot).
-    -- For now we just save a fresh snapshot at the restored frame so the
-    -- next reconcile cycle has a tight anchor; full pending-input replay
-    -- belongs to the integration test (slice 4 next iteration).
-    for i=1,#players do M.save(players[i]) end
 end
 
 return M
