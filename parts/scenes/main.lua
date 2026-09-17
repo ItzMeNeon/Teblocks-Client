@@ -1,74 +1,70 @@
 local scene = {}
 
 --[[
-    MAIN SCENE - Reworked with persistent top bar + sliding left sidebar
-    Block-stacking game themed UI:
-      • Top bar always visible; Ctrl+T (or click hamburger) toggles sidebar
-      • Left sidebar slides in/out, containing all navigation options
-      • Animated falling block particles inside sidebar backdrop
-      • Block-grid strip decorates the sidebar's right edge
-      • Rainbow spectrum border at the bottom of the top bar
+    MAIN SCENE - Clean, Modern Block-Stacking Client UI
+    Features:
+      • Permanent main menu on screen (not toggleable / no slide away)
+      • Top bar with User Profile on the left (avatar, username, login status/button)
+      • Options / Settings button opens an animated Options sidebar overlay
+      • Quick access to Game settings, Video, Audio, Controls, Keys, Touch, and Skin
+      • Top bar with centered Logo, Version subtitle, and Right action icons (Skin, Music, Notice, Lang, Dict)
+      • Clean navigation buttons & bottom utility buttons (About, Manual, Quit)
+      • Smooth background particles and centered demo board
 ]]
 
 -- ════════════════════════════════════════════════════════════
 --  LAYOUT CONSTANTS
 -- ════════════════════════════════════════════════════════════
-local SIDEBAR_W = 290       -- Sidebar panel width (px)
+local MENU_W    = 260       -- Main menu width (px)
+local MENU_X    = 24        -- Fixed left position of menu
 local TB_H      = 52        -- Top bar height (px)
-local BW        = SIDEBAR_W - 18  -- Nav button width
-local BH        = 70        -- Nav button height
-local B_GAP     = 8         -- Gap between nav buttons
-local SB_HIDE   = -(SIDEBAR_W + 20) -- Off-screen left target
+local BW        = 240       -- Nav button width
+local BH        = 56        -- Compact button height
+local B_GAP     = 8         -- Gap between buttons
 
--- Nav button grid start (y of first button)
-local NAV0   = TB_H + 36   -- leaves a small header gap below top bar
-local STRIDE = BH + B_GAP  -- vertical stride between nav buttons
+-- Navigation items placement
+local NAV0      = TB_H + 16 -- 68px from top
+local STRIDE    = BH + B_GAP -- 64px per item
 
--- Bottom sidebar buttons (About / Manual)
-local BTM_Y1 = 616
-local BTM_Y2 = 665
-local BTM_W  = BW
-local BTM_H  = 44
+-- Bottom dock buttons (About, Manual, Quit)
+local BTM_Y1    = 616
+local BTM_Y2    = 662
+local BTM_W     = 115
+local BTM_H     = 38
 
--- Top-bar icon buttons (small, fixed at top right)
-local TB_ICONS   = {'music','notice','lang','dict'}
-local TB_ICON_X  = {1096, 1142, 1188, 1234}  -- each 40 wide, 6px gap
-local TB_ICON_Y  = 6
-local TB_ICON_SZ = 40
+-- Options Sidebar (slides in from right for clean in-scene overlay)
+local OPT_W        = 340       -- Options panel width
+local optTarget    = 0         -- 0 = closed, 1 = open
+local optAnim      = 0         -- Interpolated 0 -> 1
+local optTab       = 'general' -- 'general', 'audio', 'video'
+local activeSlider = nil       -- 'mainVol', 'bgm', 'sfx' when dragging
+
+-- Top-bar icon buttons (fixed, top right)
+-- Neatly aligned horizontally with uniform 6px gap, 36px size, vertically centered in 52px top bar
+local TB_ICONS   = {'skin', 'music', 'notice', 'lang', 'dict'}
+local TB_ICON_X  = {1046, 1088, 1130, 1172, 1214}
+local TB_ICON_Y  = 8
+local TB_ICON_SZ = 36
+
+-- Key hint labels for nav buttons
+local KEY_HINTS = {'[1]','[A]','[Z]','[-]','[P]','[,]'}
 
 -- ════════════════════════════════════════════════════════════
---  TETROMINO BLOCK COLOR PALETTE (7 types)
+--  TETROMINO BLOCK COLOR PALETTE
 -- ════════════════════════════════════════════════════════════
 local BCL = {
-    COLOR.lR,  -- 1  Z / red
-    COLOR.lS,  -- 2  S / sea-green
-    COLOR.lV,  -- 3  J / violet
-    COLOR.lO,  -- 4  L / orange
-    COLOR.lM,  -- 5  T / magenta
-    COLOR.lY,  -- 6  O / yellow
-    COLOR.lC,  -- 7  I / cyan
+    COLOR.lR, COLOR.lS, COLOR.lV, COLOR.lO,
+    COLOR.lM, COLOR.lY, COLOR.lC,
 }
 
 -- ════════════════════════════════════════════════════════════
 --  TIP / VERSION
 -- ════════════════════════════════════════════════════════════
 local verName = ("%s  %s  %s"):format(SYSTEM, VERSION.string, VERSION.name)
-local tipW    = 820   -- width of the tip scroll area
-local tip     = GC.newText(getFont(24), "")
+local tipW    = 660
+local tip     = GC.newText(getFont(22), "")
 local scrollX = tipW
 local flash   = 0
-
--- ════════════════════════════════════════════════════════════
---  SIDEBAR STATE
--- ════════════════════════════════════════════════════════════
-local sidebarOpen = true
-local sidebarX    = 0          -- 0 = fully open; SB_HIDE = fully closed
-local sbTarget    = 0
-
-local function setSidebar(v)
-    sidebarOpen = v
-    sbTarget    = v and 0 or SB_HIDE
-end
 
 -- ════════════════════════════════════════════════════════════
 --  QUICK-PLAY SUBMENU
@@ -81,57 +77,45 @@ local SUB_NAV  = {'qp_40l','qp_sprint','qp_lock','offline','back'}
 
 local function setSubmenu(v)
     submenu = v
-    for _, n in next, PRIM_NAV do scene.widgetList[n].hide = v     end
-    for _, n in next, SUB_NAV  do scene.widgetList[n].hide = not v  end
+    for _, n in next, PRIM_NAV do scene.widgetList[n].hide = v end
+    for _, n in next, SUB_NAV  do scene.widgetList[n].hide = not v end
 end
 
--- ════════════════════════════════════════════════════════════
---  DECORATIVE FALLING BLOCK PARTICLES
--- ════════════════════════════════════════════════════════════
-local fallers  = {}
-local N_FALL   = 22
-
-local function spawnFaller(i, scatter)
-    local sz = math.random(10, 22)
-    fallers[i] = {
-        x     = math.random(4, SIDEBAR_W - sz - 4),
-        y     = scatter and math.random(-400, 720) or -(sz + math.random(10, 60)),
-        sz    = sz,
-        speed = math.random(8, 38),
-        col   = math.random(1, 7),
-        rot   = math.random() * 6.283,
-        rs    = (math.random() > .5 and 1 or -1) * (math.random() * .55 + .05),
-        alpha = math.random(18, 58) * .01,
-    }
-end
-
-local function initFallers()
-    for i = 1, N_FALL do spawnFaller(i, true) end
-end
-
--- ════════════════════════════════════════════════════════════
---  BLOCK-GRID STRIP DECORATION (sidebar right edge)
--- ════════════════════════════════════════════════════════════
-local DC         = 13         -- decoration cell size (px)
-local STRIP_COLS = 3          -- columns in the strip
-local STRIP_ROWS = math.ceil(720 / DC) + 2
-local stripGrid  = {}
-
-local function buildStrip()
-    local palette = {1,2,3,4,5,6,7,0,0,0,0,0}
-    stripGrid = {}
-    for r = 1, STRIP_ROWS do
-        stripGrid[r] = {}
-        local density = 0.20 + 0.60 * (r / STRIP_ROWS)
-        for c = 1, STRIP_COLS do
-            local v = palette[math.random(#palette)]
-            stripGrid[r][c] = math.random() < density and v or 0
-        end
+local function toggleOptions(open)
+    if open ~= nil then
+        optTarget = open and 1 or 0
+    else
+        optTarget = (optTarget == 0) and 1 or 0
+    end
+    if optTarget == 0 then
+        activeSlider = nil
     end
 end
 
 -- ════════════════════════════════════════════════════════════
---  CONSOLE EASTER-EGG  (unchanged from original)
+--  FALLING PARTICLES
+-- ════════════════════════════════════════════════════════════
+local bgFallers = {}
+local N_BG = 18
+local function spawnBGFaller(i, scatter)
+    local sz = math.random(14, 32)
+    bgFallers[i] = {
+        x     = math.random(MENU_W + 20, 1260),
+        y     = scatter and math.random(-400, 720) or -(sz + math.random(10, 60)),
+        sz    = sz,
+        speed = math.random(10, 26),
+        col   = math.random(1, 7),
+        rot   = math.random() * 6.283,
+        rs    = (math.random() > .5 and 1 or -1) * (math.random() * .3 + .03),
+        alpha = math.random(4, 12) * .01,
+    }
+end
+local function initBGFallers()
+    for i = 1, N_BG do spawnBGFaller(i, true) end
+end
+
+-- ════════════════════════════════════════════════════════════
+--  CONSOLE EASTER-EGG
 -- ════════════════════════════════════════════════════════════
 local enterConsole = coroutine.wrap(function()
     while true do
@@ -164,69 +148,281 @@ function scene.enter()
     GAME.modeEnv = NONE
     GAME.setting = {}
     PLY.newDemoPlayer(1)
-    -- Shift demo player rightward so it's centred in the area beside the sidebar
-    PLAYERS[1]:setPosition(760, 155, .76)
+    PLAYERS[1]:setPosition(640, 150, .76)
     DiscordRPC.update("In Main Menu")
     setSubmenu(false)
-    -- Sidebar starts open
-    setSidebar(true)
-    sidebarX = 0
-    initFallers()
-    buildStrip()
+    toggleOptions(false)
+    optAnim = 0
+    activeSlider = nil
+    WIDGET.blockZone = function(x, y) return optAnim > 0.05 end
+    initBGFallers()
+    if WS.status('game') == 'dead' then
+        NET.startupConnect()
+    end
+end
+
+function scene.leave()
+    activeSlider = nil
+    WIDGET.blockZone = nil
+    saveSettings()
 end
 
 function scene.resize() end
 
 function scene.mouseDown(x, y)
-    -- Hamburger hit-area: top-left corner of top bar
-    if x >= 4 and x <= 50 and y >= 4 and y <= TB_H - 4 then
-        setSidebar(not sidebarOpen)
+    -- Top-bar profile click (User Accounts / Login)
+    if x >= 10 and x <= 220 and y >= 6 and y <= TB_H - 6 then
+        local uid = USER and USER.uid
+        if uid and uid ~= false then
+            SCN.go('net_menu')
+        else
+            NET.login(true)
+        end
         return
     end
-    -- Console easter-egg: click the title region
-    if x >= 400 and x <= 880 and y >= TB_H and y <= TB_H + 130 then
+
+    -- Options sidebar overlay handling
+    if optAnim > 0.05 then
+        local panelLeft = 1280 - OPT_W * optAnim
+        if x < panelLeft then
+            toggleOptions(false)
+            return
+        end
+
+        -- Close button
+        if x >= 1280 - 45 and x <= 1280 - 15 and y >= TB_H + 10 and y <= TB_H + 42 then
+            toggleOptions(false)
+            return
+        end
+
+        -- Tab switching inside Options (General, Audio, Video)
+        local tabY = TB_H + 50
+        if y >= tabY and y <= tabY + 32 then
+            if x >= panelLeft + 16 and x <= panelLeft + 112 then
+                optTab = 'general'
+                SFX.play('click')
+                return
+            elseif x >= panelLeft + 118 and x <= panelLeft + 214 then
+                optTab = 'audio'
+                SFX.play('click')
+                return
+            elseif x >= panelLeft + 220 and x <= panelLeft + 316 then
+                optTab = 'video'
+                SFX.play('click')
+                return
+            end
+        end
+
+        -- In-scene settings controls
+        local itemY0 = TB_H + 92
+        local rowH   = 52
+        local stride = 58
+
+        if optTab == 'general' then
+            -- Row 1: Rotation System (TRS, SRS, etc.)
+            if y >= itemY0 and y <= itemY0 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                local rsList = {'TRS','SRS','SRS_plus','BiRS','Classic'}
+                local curRS = TABLE.find(rsList, SETTING.RS) or 1
+                curRS = (curRS % #rsList) + 1
+                SETTING.RS = rsList[curRS]
+                saveSettings()
+                SFX.play('rotate')
+                return
+            end
+            -- Row 2: Auto Pause Toggle
+            if y >= itemY0 + stride and y <= itemY0 + stride + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SETTING.autoPause = not SETTING.autoPause
+                saveSettings()
+                SFX.play('click')
+                return
+            end
+            -- Row 3: Auto Save Records Toggle
+            if y >= itemY0 + stride * 2 and y <= itemY0 + stride * 2 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SETTING.autoSave = not SETTING.autoSave
+                saveSettings()
+                SFX.play('click')
+                return
+            end
+            -- Row 4: Simplistic Mode Toggle
+            if y >= itemY0 + stride * 3 and y <= itemY0 + stride * 3 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SETTING.simpMode = not SETTING.simpMode
+                saveSettings()
+                local p = TABLE.find(SCN.stack,'main') or TABLE.find(SCN.stack,'main_simple')
+                if p then SCN.stack[p] = SETTING.simpMode and 'main_simple' or 'main' end
+                SCN.swapTo(SETTING.simpMode and 'main_simple' or 'main', 'fade')
+                return
+            end
+            -- Row 5: Open Full Keyboard Config
+            if y >= itemY0 + stride * 4 and y <= itemY0 + stride * 4 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SCN.go('setting_key')
+                return
+            end
+            -- Row 6: Open Advanced Game Settings
+            if y >= itemY0 + stride * 5 and y <= itemY0 + stride * 5 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SCN.go('setting_game')
+                return
+            end
+
+        elseif optTab == 'audio' then
+            -- Row 1: Master Volume Slider
+            if y >= itemY0 and y <= itemY0 + 58 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                activeSlider = 'mainVol'
+                local v = math.max(0, math.min(1, (x - (panelLeft + 30)) / (OPT_W - 60)))
+                SETTING.mainVol = math.floor(v * 100) / 100
+                love.audio.setVolume(SETTING.mainVol)
+                saveSettings()
+                return
+            end
+            -- Row 2: Music Volume Slider
+            if y >= itemY0 + 64 and y <= itemY0 + 122 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                activeSlider = 'bgm'
+                local v = math.max(0, math.min(1, (x - (panelLeft + 30)) / (OPT_W - 60)))
+                SETTING.bgm = math.floor(v * 100) / 100
+                BGM.setVol(SETTING.bgm)
+                saveSettings()
+                return
+            end
+            -- Row 3: SFX Volume Slider
+            if y >= itemY0 + 128 and y <= itemY0 + 186 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                activeSlider = 'sfx'
+                local v = math.max(0, math.min(1, (x - (panelLeft + 30)) / (OPT_W - 60)))
+                SETTING.sfx = math.floor(v * 100) / 100
+                SFX.setVol(SETTING.sfx)
+                saveSettings()
+                SFX.play('warn_1')
+                return
+            end
+            -- Row 4: Auto Mute Toggle
+            if y >= itemY0 + 192 and y <= itemY0 + 244 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SETTING.autoMute = not SETTING.autoMute
+                saveSettings()
+                SFX.play('click')
+                return
+            end
+            -- Row 5: Voice & Sound Packs
+            if y >= itemY0 + 250 and y <= itemY0 + 302 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SCN.go('setting_sound')
+                return
+            end
+
+        elseif optTab == 'video' then
+            -- Row 1: Active Piece Toggle
+            if y >= itemY0 and y <= itemY0 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SETTING.block = not SETTING.block
+                saveSettings()
+                SFX.play('click')
+                return
+            end
+            -- Row 2: Smooth Falling Toggle
+            if y >= itemY0 + stride and y <= itemY0 + stride + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SETTING.smooth = not SETTING.smooth
+                saveSettings()
+                SFX.play('click')
+                return
+            end
+            -- Row 3: 3D Blocks Toggle
+            if y >= itemY0 + stride * 2 and y <= itemY0 + stride * 2 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SETTING.upEdge = not SETTING.upEdge
+                saveSettings()
+                SFX.play('click')
+                return
+            end
+            -- Row 4: Fullscreen Toggle
+            if y >= itemY0 + stride * 3 and y <= itemY0 + stride * 3 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SETTING.fullscreen = not SETTING.fullscreen
+                applySettings()
+                saveSettings()
+                SFX.play('click')
+                return
+            end
+            -- Row 5: Skin Gallery
+            if y >= itemY0 + stride * 4 and y <= itemY0 + stride * 4 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SCN.go('skin_browse')
+                return
+            end
+            -- Row 6: Advanced Video Settings
+            if y >= itemY0 + stride * 5 and y <= itemY0 + stride * 5 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
+                SCN.go('setting_video')
+                return
+            end
+        end
+        return
+    end
+
+    -- Console easter-egg on title
+    if x >= 500 and x <= 780 and y >= 0 and y <= TB_H then
         enterConsole()
     end
 end
 scene.touchDown = scene.mouseDown
 
+function scene.mouseMove(x, y)
+    if activeSlider and love.mouse.isDown(1) then
+        local panelLeft = 1280 - OPT_W * optAnim
+        local v = math.max(0, math.min(1, (x - (panelLeft + 30)) / (OPT_W - 60)))
+        v = math.floor(v * 100) / 100
+        if activeSlider == 'mainVol' then
+            SETTING.mainVol = v
+            love.audio.setVolume(v)
+        elseif activeSlider == 'bgm' then
+            SETTING.bgm = v
+            BGM.setVol(v)
+        elseif activeSlider == 'sfx' then
+            SETTING.sfx = v
+            SFX.setVol(v)
+        end
+    end
+end
+scene.touchMove = scene.mouseMove
+
+function scene.mouseUp(x, y)
+    if activeSlider then
+        if activeSlider == 'sfx' then
+            SFX.play('warn_1')
+        end
+        saveSettings()
+        activeSlider = nil
+    end
+end
+scene.touchUp = scene.mouseUp
+
 -- ════════════════════════════════════════════════════════════
---  KEYBOARD HANDLER
+--  KEYBOARD
 -- ════════════════════════════════════════════════════════════
 local function _testButton(W)
-    if WIDGET.isFocus(W) then return true
-    else WIDGET.focus(W) end
+    if WIDGET.isFocus(W) then return true else WIDGET.focus(W) end
 end
 
 function scene.keyDown(key, isRep)
     if isRep then return true end
 
-    -- Ctrl+T: toggle sidebar
-    if key == 't' and love.keyboard.isDown('lctrl','rctrl') then
-        setSidebar(not sidebarOpen)
+    -- Options sidebar closes on escape
+    if optTarget == 1 and (key == 'escape' or key == 'backspace') then
+        toggleOptions(false)
         return
     end
 
     if submenu then
-        if     key=='q'                         then if _testButton(scene.widgetList.qp_40l)   then loadGame('sprint_40l',  true) end
-        elseif key=='w'                         then if _testButton(scene.widgetList.qp_sprint) then loadGame('sprint_100l', true) end
-        elseif key=='e'                         then if _testButton(scene.widgetList.qp_lock)   then loadGame('sprintLock',  true) end
-        elseif key=='r'                         then if _testButton(scene.widgetList.offline)   then SCN.go('mode')                end
-        elseif key=='escape' or key=='backspace' then if _testButton(scene.widgetList.back)      then setSubmenu(false)            end
+        if     key == 'q'                         then if _testButton(scene.widgetList.qp_40l)    then loadGame('sprint_40l', true) end
+        elseif key == 'w'                         then if _testButton(scene.widgetList.qp_sprint) then loadGame('sprint_100l', true) end
+        elseif key == 'e'                         then if _testButton(scene.widgetList.qp_lock)   then loadGame('sprintLock', true) end
+        elseif key == 'r'                         then if _testButton(scene.widgetList.offline)   then SCN.go('mode') end
+        elseif key == 'escape' or key == 'backspace' then if _testButton(scene.widgetList.back)  then setSubmenu(false) end
         else return true
         end
     else
-        if     key=='1'   then if _testButton(scene.widgetList.qplay)    then setSubmenu(true)                                        end
-        elseif key=='a'   then if _testButton(scene.widgetList.online)   then NET.login(true)                                         end
-        elseif key=='z'   then if _testButton(scene.widgetList.custom)   then SCN.go('customGame')                                    end
-        elseif key=='p'   then if _testButton(scene.widgetList.stat)     then SCN.go('stat')                                          end
-        elseif key==','   then if _testButton(scene.widgetList.replays)  then SCN.go('replays')                                       end
-        elseif key=='-'   then if _testButton(scene.widgetList.settings) then SCN.go('setting_game')                                  end
-        elseif key=='2'   then if _testButton(scene.widgetList.music)    then SCN.go('music')                                         end
-        elseif key=='3'   then if _testButton(scene.widgetList.notice)   then NET.getNotice()                                         end
-        elseif key=='4'   then if _testButton(scene.widgetList.lang)     then SCN.go('lang')                                          end
-        elseif key=='x'   then if _testButton(scene.widgetList.about)    then SCN.go('about')                                         end
-        elseif key=='h'   then
+        if     key == '1'      then if _testButton(scene.widgetList.qplay)    then setSubmenu(true) end
+        elseif key == 'a'      then if _testButton(scene.widgetList.online)   then if WS.status('game') == 'running' then SCN.go('lobby') else NET.login(true) end end
+        elseif key == 'z'      then if _testButton(scene.widgetList.custom)   then SCN.go('customGame') end
+        elseif key == 'p'      then if _testButton(scene.widgetList.stat)     then SCN.go('stat') end
+        elseif key == ','      then if _testButton(scene.widgetList.replays)  then SCN.go('replays') end
+        elseif key == '-'      then toggleOptions()
+        elseif key == '2'      then if _testButton(scene.widgetList.music)    then SCN.go('music') end
+        elseif key == '3'      then if _testButton(scene.widgetList.notice)   then NET.getNotice() end
+        elseif key == '4'      then if _testButton(scene.widgetList.lang)     then SCN.go('lang') end
+        elseif key == '5'      then if _testButton(scene.widgetList.skin)     then SCN.go('skin_browse') end
+        elseif key == 'x'      then if _testButton(scene.widgetList.about)    then SCN.go('about') end
+        elseif key == 'h'      then
             if _testButton(scene.widgetList.manual) then
                 SCN.go('textReader', nil,
                     FILE.load('parts/language/manual_'..(
@@ -235,9 +431,9 @@ function scene.keyDown(key, isRep)
                         SETTING.locale:find'vi' and 'vi' or 'en'
                     )..'.txt','-string'):split('\n'), 15, 'cubes')
             end
-        elseif key=='b'   then if _testButton(scene.widgetList.dict)     then SCN.go('dict')                                          end
-        elseif key=='c'   then enterConsole()
-        elseif key=='escape' then
+        elseif key == 'b'      then if _testButton(scene.widgetList.dict)     then SCN.go('dict') end
+        elseif key == 'c'      then enterConsole()
+        elseif key == 'escape' then
             if tryBack() then VOC.play('bye') SCN.back() end
         else return true
         end
@@ -252,58 +448,58 @@ function scene.update(dt)
 
     if flash > 0 then flash = flash - dt * .6 end
 
+    -- Options sidebar animation
+    optAnim = MATH.expApproach(optAnim, optTarget, dt * 14)
+
+    -- Dynamic centering of demo board (centered at 640, smoothly adjusts if options open)
+    local pCenterX = 640 - (optAnim * 38)
+    PLAYERS[1]:setPosition(pCenterX, 150, .76)
     PLAYERS[1]:update(dt)
 
-    -- Tip scroll
-    scrollX = scrollX - 148 * dt
+    -- Tip ticker
+    scrollX = scrollX - 120 * dt
     if scrollX < -tip:getWidth() then
         scrollX = tipW
         tip:set(text.getTip())
     end
 
-    -- Animate sidebar toward target
-    sidebarX = MATH.expApproach(sidebarX, sbTarget, dt * 10)
-
-    -- Animate falling block particles
-    for i = 1, #fallers do
-        local f = fallers[i]
+    -- Ambient background particles
+    for i = 1, #bgFallers do
+        local f = bgFallers[i]
         f.y   = f.y + f.speed * dt
         f.rot = f.rot + f.rs * dt
-        if f.y > 740 then spawnFaller(i, false) end
+        if f.y > 740 then spawnBGFaller(i, false) end
     end
 
-    -- ── Position all widgets ───────────────────────────────
-    local L  = scene.widgetList
-    local SX = math.floor(sidebarX)  -- sidebar screen-left (pixel)
-    -- Widget x,y in newButton are the CENTER; but after creation the stored
-    -- .x is already left-edge (= center - w/2).  We therefore set .x directly
-    -- as the left-edge here.
-    local BX = SX + 9               -- left-edge of nav buttons inside sidebar
+    -- ── Widget Positioning (Fixed Clean Placement) ─────────
+    local L = scene.widgetList
 
-    -- Primary nav buttons
     for i, n in ipairs(PRIM_NAV) do
         local W = L[n]
-        W.x = BX
+        W.x = MENU_X
         W.y = NAV0 + (i - 1) * STRIDE
     end
-    -- Sub-menu nav buttons (same y-layout, different names)
     for i, n in ipairs(SUB_NAV) do
         local W = L[n]
-        W.x = BX
+        W.x = MENU_X
         W.y = NAV0 + (i - 1) * STRIDE
     end
-    -- Bottom sidebar buttons
-    L.about.x  = BX;  L.about.y  = BTM_Y1
-    L.manual.x = BX;  L.manual.y = BTM_Y2
 
-    -- Top-bar icon buttons (fixed position, independent of sidebar)
+    -- Bottom action buttons
+    L.about.x  = MENU_X
+    L.about.y  = BTM_Y1
+    L.manual.x = MENU_X + BTM_W + 10
+    L.manual.y = BTM_Y1
+    L.quit.x   = MENU_X
+    L.quit.y   = BTM_Y2
+
+    -- Top bar icons (always visible)
     for i, n in ipairs(TB_ICONS) do
-        local W = L[n]
-        W.x = TB_ICON_X[i]
-        W.y = TB_ICON_Y
+        L[n].x = TB_ICON_X[i]
+        L[n].y = TB_ICON_Y
     end
 
-    -- Matchmaking search popup fade
+    -- Matchmaking popup fade
     if NET.matchFoundPending then
         searchPopupAlpha = math.max(0, searchPopupAlpha - dt * 6)
     elseif NET.matchmaking then
@@ -316,169 +512,461 @@ end
 -- ════════════════════════════════════════════════════════════
 --  DRAW HELPERS
 -- ════════════════════════════════════════════════════════════
-
--- Stencil function for clipping sidebar content
-local _sbSX, _sbSW = 0, SIDEBAR_W
-local function _sidebarStencil()
-    GC.rectangle('fill', _sbSX, 0, _sbSW, 720)
+local function _tipStencil()
+    GC.rectangle('fill', 0, 0, tipW, 30)
 end
 
--- Stencil for clipping the tip scroll box
-local function _tipStencil()
-    GC.rectangle('fill', 0, 0, tipW, 36)
+-- ─── drawBGParticles ─────────────────────────────────────────
+local function drawBGParticles()
+    for i = 1, #bgFallers do
+        local f = bgFallers[i]
+        local bc = BCL[f.col]
+        GC.setColor(bc[1], bc[2], bc[3], f.alpha)
+        GC.push('transform')
+        GC.translate(f.x + f.sz * .5, f.y + f.sz * .5)
+        GC.rotate(f.rot)
+        GC.rectangle('fill', -f.sz * .5, -f.sz * .5, f.sz, f.sz, 3)
+        GC.pop()
+    end
+end
+
+-- ─── drawKeyHints ─────────────────────────────────────────────
+local function drawKeyHints()
+    local hints = submenu and {'[Q]','[W]','[E]','[R]','[Esc]'} or KEY_HINTS
+    local navList = submenu and SUB_NAV or PRIM_NAV
+    for i, _ in ipairs(navList) do
+        local by = NAV0 + (i - 1) * STRIDE
+        GC.setColor(1, 1, 1, .28)
+        setFont(11)
+        GC.print(hints[i] or '', MENU_X + BW - 18 - #(hints[i] or '') * 6, by + BH - 14)
+    end
 end
 
 -- ─── drawTopBar ──────────────────────────────────────────────
 local function drawTopBar(t)
     local W = 1280
 
-    -- Dark background panel
-    GC.setColor(.04, .05, .12, .97)
+    -- Top bar glass backdrop
+    GC.setColor(.035, .045, .10, .96)
     GC.rectangle('fill', 0, 0, W, TB_H)
 
-    -- ── Rainbow block-color spectrum strip at bottom of top bar ──
+    -- Rainbow spectrum line at the bottom
     local segW = W / 7
     for i = 1, 7 do
         local c = BCL[i]
-        GC.setColor(c[1], c[2], c[3], .90)
-        GC.rectangle('fill', (i-1)*segW, TB_H - 3, segW + 1, 3)
+        GC.setColor(c[1], c[2], c[3], .85)
+        GC.rectangle('fill', (i - 1) * segW, TB_H - 2, segW + 1, 2)
     end
 
-    -- ── Subtle block-grid accent in top-bar background ──
-    -- Small 8×8 blocks tiled with low opacity
-    for col = 0, math.floor(W / 10) do
-        for row = 0, math.floor(TB_H / 10) do
-            local idx = (col + row * 3) % 7 + 1
-            local c = BCL[idx]
-            GC.setColor(c[1], c[2], c[3], .04)
-            GC.rectangle('fill', col*10, row*10, 9, 9, 1)
+    -- ── User Profile Pill (Top-Left of Top Bar) ──────────────
+    local profX, profY, profW, profH = 10, 6, 210, 40
+    local mx, my = love.mouse.getPosition()
+    local isHoverProf = (mx >= profX and mx <= profX + profW and my >= profY and my <= profY + profH)
+
+    if isHoverProf then
+        GC.setColor(.16, .22, .44, .70)
+        GC.rectangle('fill', profX, profY, profW, profH, 6)
+    else
+        GC.setColor(.08, .11, .24, .50)
+        GC.rectangle('fill', profX, profY, profW, profH, 6)
+    end
+    GC.setColor(.22, .28, .52, .50)
+    GC.setLineWidth(1)
+    GC.rectangle('line', profX, profY, profW, profH, 6)
+
+    local uid      = USER and USER.uid
+    local uname    = uid and USERS and USERS[uid] and USERS[uid].username or nil
+    local isLogged = uid and uid ~= false
+
+    -- Avatar circular frame
+    local avX, avY, avR = profX + 20, profY + profH * .5, 14
+    if isLogged and USERS and USERS[uid] and USERS.getAvatar then
+        local img = USERS.getAvatar(uid)
+        if img then
+            GC.setColor(1, 1, 1, 1)
+            GC.stencil(function() GC.circle('fill', avX, avY, avR) end, 'replace', 1)
+            GC.setStencilTest('equal', 1)
+            GC.draw(img, avX - avR, avY - avR, 0, (avR * 2) / 128)
+            GC.setStencilTest()
         end
+    else
+        local idx = math.floor(t * .4) % 7 + 1
+        local bc  = BCL[idx]
+        GC.setColor(bc[1], bc[2], bc[3], .35)
+        GC.circle('fill', avX, avY, avR)
+        GC.setColor(bc[1], bc[2], bc[3], .80)
+        GC.setLineWidth(1.5)
+        GC.circle('line', avX, avY, avR)
+        GC.setColor(1, 1, 1, .6)
+        setFont(14)
+        GC.mStr("?", avX, avY - 8)
     end
 
-    -- ── Hamburger icon (3 bars) at top-left ──
-    local hx, hy0 = 14, 14
-    GC.setColor(.88, .92, .98, .92)
-    GC.setLineWidth(2.5)
-    for row = 0, 2 do
-        GC.line(hx, hy0 + row * 9, hx + 22, hy0 + row * 9)
+    -- Username and Status
+    local tx = profX + 42
+    if isLogged and uname then
+        GC.setColor(.95, .97, 1, .95)
+        setFont(14)
+        GC.print(uname, tx, profY + 5)
+        -- Online indicator dot
+        GC.setColor(.22, .95, .45, 1)
+        GC.circle('fill', tx + math.min(#uname * 8 + 8, profW - 60), profY + 12, 3)
+        GC.setColor(.55, .65, .85, .75)
+        setFont(11)
+        GC.print("Account (Click)", tx, profY + 22)
+    else
+        GC.setColor(.88, .92, 1, .9)
+        setFont(14)
+        GC.print("Guest Player", tx, profY + 5)
+        GC.setColor(.50, .60, .82, .75)
+        setFont(11)
+        GC.print("Sign In [A]", tx, profY + 22)
     end
 
-    -- ── Game logo centred in top bar ──
+    -- ── Title Logo & Version (Centered) ──────────────────────
     GC.setColor(1, 1, 1, .95)
-    mDraw(TEXTURE.title_color, 640, TB_H * .5 + 1, nil, .27)
+    mDraw(TEXTURE.title_color, 640, 21, nil, .22)
 
-    -- ── Version string (small, under logo) ──
-    GC.setColor(.42, .46, .58, .85)
-    setFont(13)
-    GC.mStr(verName, 640, TB_H - 13)
+    GC.setColor(.48, .55, .72, .85)
+    setFont(11)
+    GC.mStr(verName, 640, 36)
 end
 
--- ─── drawSidebar ─────────────────────────────────────────────
-local function drawSidebar(t)
-    local SX  = math.floor(sidebarX)
-    local SW  = SIDEBAR_W
-    local H   = 720
+-- ─── drawOptionsSidebar ──────────────────────────────────────
+local function drawOptionsSidebar(t)
+    if optAnim < 0.005 then return end
 
-    -- ── Main panel background ──
-    GC.setColor(.04, .05, .11, .97)
-    GC.rectangle('fill', SX, 0, SW, H)
+    local panelLeft = 1280 - OPT_W * optAnim
+    local alpha = optAnim
+    local mx, my = love.mouse.getPosition()
 
-    -- ── Block-grid strip decoration on the right edge ──
-    local stripX = SX + SW - STRIP_COLS * DC
-    for r = 1, #stripGrid do
-        for c = 1, STRIP_COLS do
-            local v = stripGrid[r][c]
-            if v > 0 then
-                local bc = BCL[v]
-                GC.setColor(bc[1], bc[2], bc[3], .20)
-                GC.rectangle('fill',
-                    stripX + (c-1)*DC + 1,
-                    (r-1)*DC + 1,
-                    DC - 2, DC - 2, 2)
-                -- Inner highlight
-                GC.setColor(bc[1], bc[2], bc[3], .08)
-                GC.rectangle('fill',
-                    stripX + (c-1)*DC + 2,
-                    (r-1)*DC + 2,
-                    (DC-4)*.55, (DC-4)*.55)
-            end
+    -- Dim background layer
+    GC.setColor(0, 0, 0, alpha * 0.45)
+    GC.rectangle('fill', 0, TB_H, 1280, 720 - TB_H)
+
+    -- Sidebar background
+    GC.setColor(.05, .06, .14, alpha * 0.98)
+    GC.rectangle('fill', panelLeft, TB_H, OPT_W, 720 - TB_H)
+
+    -- Left border glowing accent line
+    GC.setColor(.24, .36, .75, alpha * 0.85)
+    GC.setLineWidth(2)
+    GC.line(panelLeft, TB_H, panelLeft, 720)
+
+    -- Header
+    GC.setColor(.90, .94, 1, alpha)
+    setFont(18)
+    GC.print("OPTIONS & SETTINGS", panelLeft + 20, TB_H + 16)
+
+    -- Close [✕] Button
+    local isCloseHover = (mx >= 1280 - 45 and mx <= 1280 - 15 and my >= TB_H + 10 and my <= TB_H + 42)
+    if isCloseHover then
+        GC.setColor(1, .35, .45, alpha)
+    else
+        GC.setColor(.60, .68, .88, alpha * 0.85)
+    end
+    setFont(20)
+    GC.mStr("✕", 1280 - 28, TB_H + 14)
+
+    -- Tabs bar: General, Audio, Video
+    local tabY = TB_H + 50
+    local tabH = 30
+    local tabs = {
+        { id = 'general', label = "General", x = panelLeft + 16,  w = 96 },
+        { id = 'audio',   label = "Audio",   x = panelLeft + 118, w = 96 },
+        { id = 'video',   label = "Video",   x = panelLeft + 220, w = 96 },
+    }
+
+    for _, tb in ipairs(tabs) do
+        local isCur = (optTab == tb.id)
+        local isHover = (mx >= tb.x and mx <= tb.x + tb.w and my >= tabY and my <= tabY + tabH)
+        if isCur then
+            GC.setColor(.22, .34, .75, alpha * 0.9)
+            GC.rectangle('fill', tb.x, tabY, tb.w, tabH, 5)
+            GC.setColor(.45, .70, 1, alpha)
+            GC.setLineWidth(1.5)
+            GC.rectangle('line', tb.x, tabY, tb.w, tabH, 5)
+            GC.setColor(1, 1, 1, alpha)
+        elseif isHover then
+            GC.setColor(.14, .18, .36, alpha * 0.75)
+            GC.rectangle('fill', tb.x, tabY, tb.w, tabH, 5)
+            GC.setColor(.35, .45, .80, alpha * 0.6)
+            GC.setLineWidth(1)
+            GC.rectangle('line', tb.x, tabY, tb.w, tabH, 5)
+            GC.setColor(.85, .90, 1, alpha * 0.9)
+        else
+            GC.setColor(.08, .11, .24, alpha * 0.55)
+            GC.rectangle('fill', tb.x, tabY, tb.w, tabH, 5)
+            GC.setColor(.18, .22, .42, alpha * 0.4)
+            GC.setLineWidth(1)
+            GC.rectangle('line', tb.x, tabY, tb.w, tabH, 5)
+            GC.setColor(.60, .68, .85, alpha * 0.75)
+        end
+        setFont(13)
+        GC.mStr(tb.label, tb.x + tb.w * 0.5, tabY + 7)
+    end
+
+    -- Tab Content Controls
+    local itemY0 = TB_H + 92
+    local itemW  = OPT_W - 32
+    local itemX  = panelLeft + 16
+
+    local function drawCard(rx, ry, rw, rh, isHover)
+        if isHover then
+            GC.setColor(.16, .22, .44, alpha * 0.85)
+            GC.rectangle('fill', rx, ry, rw, rh, 6)
+            GC.setColor(.35, .50, .90, alpha * 0.75)
+            GC.setLineWidth(1)
+            GC.rectangle('line', rx, ry, rw, rh, 6)
+        else
+            GC.setColor(.09, .12, .25, alpha * 0.65)
+            GC.rectangle('fill', rx, ry, rw, rh, 6)
+            GC.setColor(.18, .22, .42, alpha * 0.40)
+            GC.setLineWidth(1)
+            GC.rectangle('line', rx, ry, rw, rh, 6)
         end
     end
 
-    -- ── Clip falling particles to sidebar bounds ──
-    _sbSX, _sbSW = SX, SW
-    GC.stencil(_sidebarStencil, 'replace', 1)
-    GC.setStencilTest('equal', 1)
-
-    for i = 1, #fallers do
-        local f  = fallers[i]
-        local bc = BCL[f.col]
-        GC.setColor(bc[1], bc[2], bc[3], f.alpha)
-        GC.push('transform')
-        GC.translate(SX + f.x + f.sz*.5, f.y + f.sz*.5)
-        GC.rotate(f.rot)
-        GC.rectangle('fill', -f.sz*.5, -f.sz*.5, f.sz, f.sz, 3)
-        -- Mini inner shine
-        GC.setColor(1, 1, 1, f.alpha * .35)
-        GC.rectangle('fill', -f.sz*.5 + 2, -f.sz*.5 + 2, f.sz*.45, f.sz*.35, 2)
-        GC.pop()
+    local function drawSwitch(rx, ry, rw, rh, isOn)
+        local sw, sh = 44, 22
+        local sx, sy = rx + rw - sw - 12, ry + (rh - sh) * 0.5
+        if isOn then
+            GC.setColor(.18, .75, .42, alpha * 0.9)
+        else
+            GC.setColor(.22, .26, .38, alpha * 0.7)
+        end
+        GC.rectangle('fill', sx, sy, sw, sh, sh * 0.5)
+        local knobX = isOn and (sx + sw - sh + 2) or (sx + 2)
+        local knobY = sy + 2
+        local knobD = sh - 4
+        GC.setColor(1, 1, 1, alpha)
+        GC.circle('fill', knobX + knobD * 0.5, knobY + knobD * 0.5, knobD * 0.5)
+        setFont(11)
+        if isOn then
+            GC.setColor(.3, .95, .5, alpha)
+            GC.print("ON", sx - 26, sy + 3)
+        else
+            GC.setColor(.6, .65, .75, alpha * 0.8)
+            GC.print("OFF", sx - 28, sy + 3)
+        end
     end
 
-    GC.setStencilTest()
+    local function drawSliderCtrl(rx, ry, rw, rh, val, label, isHover)
+        drawCard(rx, ry, rw, rh, isHover)
+        GC.setColor(.92, .96, 1, alpha * 0.95)
+        setFont(14)
+        GC.print(label, rx + 14, ry + 8)
+        local pct = ("%d%%"):format(math.floor(val * 100))
+        setFont(13)
+        GC.setColor(.55, .78, 1, alpha * 0.9)
+        GC.mStr(pct, rx + rw - 30, ry + 8)
 
-    -- ── Animated colour shimmer on the right edge ──
-    local rightEdge = SX + SW - STRIP_COLS * DC - 1
-    local phase     = (t * .35) % 1
-    GC.setLineWidth(2)
-    for seg = 0, 8 do
-        local c  = BCL[(seg + math.floor(t * .8)) % 7 + 1]
-        local sy = (seg * 89 + phase * 720) % 720
-        local ey = math.min(sy + 60, 720)
-        GC.setColor(c[1], c[2], c[3], .55)
-        GC.line(rightEdge, sy, rightEdge, ey)
+        local trackX = rx + 14
+        local trackY = ry + 34
+        local trackW = rw - 28
+        local trackH = 8
+        GC.setColor(.14, .18, .32, alpha * 0.85)
+        GC.rectangle('fill', trackX, trackY, trackW, trackH, 4)
+
+        local fillW = math.max(0, math.min(trackW, trackW * val))
+        if fillW > 0 then
+            GC.setColor(.32, .68, 1, alpha * 0.95)
+            GC.rectangle('fill', trackX, trackY, fillW, trackH, 4)
+        end
+        local knobX = trackX + fillW
+        local knobY = trackY + trackH * 0.5
+        GC.setColor(1, 1, 1, alpha)
+        GC.circle('fill', knobX, knobY, 7)
+        GC.setColor(.22, .45, .88, alpha * 0.85)
+        GC.setLineWidth(1.5)
+        GC.circle('line', knobX, knobY, 7)
     end
 
-    -- ── "NAVIGATION" sub-header ──
-    local visAlpha = math.max(0, math.min(1, (sidebarX - SB_HIDE) / (0 - SB_HIDE)))
-    if visAlpha > .01 then
-        GC.setColor(.5, .58, .78, visAlpha * .65)
+    if optTab == 'general' then
+        local stride = 58
+        local rowH   = 52
+        local genRows = {
+            {
+                title = "Rotation System",
+                sub   = "Piece rotation rule",
+                badge = "[ " .. tostring(SETTING.RS or 'TRS') .. " ]",
+                badgeCol = COLOR.lY,
+            },
+            {
+                title = "Auto Pause",
+                sub   = "Pause when window unfocused",
+                isSwitch = true,
+                val   = SETTING.autoPause,
+            },
+            {
+                title = "Auto Save Records",
+                sub   = "Save replays on game over",
+                isSwitch = true,
+                val   = SETTING.autoSave,
+            },
+            {
+                title = "Simplistic Mode",
+                sub   = "Clean distraction-free menu",
+                isSwitch = true,
+                val   = SETTING.simpMode,
+            },
+            {
+                title = "Keyboard Controls",
+                sub   = "Customize game keys",
+                badge = "Configure →",
+                badgeCol = COLOR.lC,
+            },
+            {
+                title = "Handling & Tuning",
+                sub   = "DAS, ARR, SD-ARR, Finesse",
+                badge = "Advanced →",
+                badgeCol = COLOR.lM,
+            },
+        }
+
+        for idx, row in ipairs(genRows) do
+            local ry = itemY0 + (idx - 1) * stride
+            local isHover = (mx >= itemX and mx <= itemX + itemW and my >= ry and my <= ry + rowH)
+            drawCard(itemX, ry, itemW, rowH, isHover)
+
+            GC.setColor(.92, .96, 1, alpha * 0.95)
+            setFont(14)
+            GC.print(row.title, itemX + 14, ry + 7)
+
+            GC.setColor(.55, .62, .80, alpha * 0.75)
+            setFont(11)
+            GC.print(row.sub, itemX + 14, ry + 28)
+
+            if row.isSwitch then
+                drawSwitch(itemX, ry, itemW, rowH, row.val)
+            elseif row.badge then
+                local bc = row.badgeCol or COLOR.lC
+                GC.setColor(bc[1], bc[2], bc[3], alpha * 0.9)
+                setFont(12)
+                GC.mStr(row.badge, itemX + itemW - 48, ry + 16)
+            end
+        end
+
+    elseif optTab == 'audio' then
+        local isHov1 = (mx >= itemX and mx <= itemX + itemW and my >= itemY0 and my <= itemY0 + 58)
+        drawSliderCtrl(itemX, itemY0, itemW, 58, SETTING.mainVol or 1, "Master Volume", isHov1)
+
+        local isHov2 = (mx >= itemX and mx <= itemX + itemW and my >= itemY0 + 64 and my <= itemY0 + 122)
+        drawSliderCtrl(itemX, itemY0 + 64, itemW, 58, SETTING.bgm or 1, "Music (BGM)", isHov2)
+
+        local isHov3 = (mx >= itemX and mx <= itemX + itemW and my >= itemY0 + 128 and my <= itemY0 + 186)
+        drawSliderCtrl(itemX, itemY0 + 128, itemW, 58, SETTING.sfx or 1, "Sound Effects", isHov3)
+
+        -- Auto Mute
+        local ry4 = itemY0 + 192
+        local isHov4 = (mx >= itemX and mx <= itemX + itemW and my >= ry4 and my <= ry4 + 52)
+        drawCard(itemX, ry4, itemW, 52, isHov4)
+        GC.setColor(.92, .96, 1, alpha * 0.95)
+        setFont(14)
+        GC.print("Auto Mute", itemX + 14, ry4 + 7)
+        GC.setColor(.55, .62, .80, alpha * 0.75)
+        setFont(11)
+        GC.print("Mute audio on focus loss", itemX + 14, ry4 + 28)
+        drawSwitch(itemX, ry4, itemW, 52, SETTING.autoMute)
+
+        -- Sound Scene
+        local ry5 = itemY0 + 250
+        local isHov5 = (mx >= itemX and mx <= itemX + itemW and my >= ry5 and my <= ry5 + 52)
+        drawCard(itemX, ry5, itemW, 52, isHov5)
+        GC.setColor(.92, .96, 1, alpha * 0.95)
+        setFont(14)
+        GC.print("Voice & Sound Packs", itemX + 14, ry5 + 7)
+        GC.setColor(.55, .62, .80, alpha * 0.75)
+        setFont(11)
+        GC.print("Voice packs, stereo, alert SFX", itemX + 14, ry5 + 28)
+        GC.setColor(COLOR.lY[1], COLOR.lY[2], COLOR.lY[3], alpha * 0.9)
         setFont(12)
-        GC.mStr("NAVIGATION", SX + (SW - STRIP_COLS * DC) * .5, TB_H + 10)
-    end
+        GC.mStr("Sound Scene →", itemX + itemW - 54, ry5 + 16)
 
-    -- ── Separator between top-bar area and nav items ──
-    GC.setColor(.18, .22, .42, .55)
-    GC.setLineWidth(1)
-    GC.line(SX + 6, TB_H + 28, SX + SW - STRIP_COLS*DC - 6, TB_H + 28)
+    elseif optTab == 'video' then
+        local stride = 58
+        local rowH   = 52
+        local vidRows = {
+            {
+                title = "Active Piece",
+                sub   = "Show falling active tetromino",
+                isSwitch = true,
+                val   = SETTING.block,
+            },
+            {
+                title = "Smooth Falling",
+                sub   = "Sub-pixel smooth fall movement",
+                isSwitch = true,
+                val   = SETTING.smooth,
+            },
+            {
+                title = "3D Block Edges",
+                sub   = "Isometric bevel edge lighting",
+                isSwitch = true,
+                val   = SETTING.upEdge,
+            },
+            {
+                title = "Fullscreen Mode",
+                sub   = "Toggle borderless / fullscreen",
+                isSwitch = true,
+                val   = SETTING.fullscreen,
+            },
+            {
+                title = "Skin & Textures",
+                sub   = "Current: " .. tostring(SETTING.skinSet or 'default'),
+                badge = "Browse Skins →",
+                badgeCol = COLOR.lP,
+            },
+            {
+                title = "Visual Effects",
+                sub   = "Ghost piece, grid, shaders",
+                badge = "Advanced →",
+                badgeCol = COLOR.lC,
+            },
+        }
 
-    -- ── Separator between nav buttons and bottom items ──
-    local sepY = BTM_Y1 - 10
-    GC.setColor(.18, .22, .42, .45)
-    GC.line(SX + 6, sepY, SX + SW - STRIP_COLS*DC - 6, sepY)
+        for idx, row in ipairs(vidRows) do
+            local ry = itemY0 + (idx - 1) * stride
+            local isHover = (mx >= itemX and mx <= itemX + itemW and my >= ry and my <= ry + rowH)
+            drawCard(itemX, ry, itemW, rowH, isHover)
 
-    -- ── Drop-shadow to the right of the sidebar ──
-    for i = 1, 12 do
-        local a = ((1 - i/12)^1.8) * .40
-        GC.setColor(0, 0, 0, a)
-        GC.setLineWidth(1)
-        GC.line(SX + SW + i, 0, SX + SW + i, H)
+            GC.setColor(.92, .96, 1, alpha * 0.95)
+            setFont(14)
+            GC.print(row.title, itemX + 14, ry + 7)
+
+            GC.setColor(.55, .62, .80, alpha * 0.75)
+            setFont(11)
+            GC.print(row.sub, itemX + 14, ry + 28)
+
+            if row.isSwitch then
+                drawSwitch(itemX, ry, itemW, rowH, row.val)
+            elseif row.badge then
+                local bc = row.badgeCol or COLOR.lC
+                GC.setColor(bc[1], bc[2], bc[3], alpha * 0.9)
+                setFont(12)
+                GC.mStr(row.badge, itemX + itemW - 54, ry + 16)
+            end
+        end
     end
 end
 
 -- ─── drawTip ─────────────────────────────────────────────────
-local function drawTip(t)
-    local tipX = math.max(SIDEBAR_W + 22, math.floor(sidebarX) + SIDEBAR_W + 22)
-    local tipY = 677
+local function drawTip()
+    local tipX = MENU_X + BW + 36
+    local tipY = 680
 
-    GC.setColor(COLOR.Z[1], COLOR.Z[2], COLOR.Z[3], .50)
+    GC.setColor(.12, .16, .30, .6)
+    GC.rectangle('fill', tipX, tipY, tipW, 30, 4)
+    GC.setColor(.22, .30, .55, .4)
+    GC.setLineWidth(1)
+    GC.rectangle('line', tipX, tipY, tipW, 30, 4)
+
     GC.push('transform')
-    GC.translate(tipX, tipY)
-    GC.setLineWidth(1.5)
-    GC.rectangle('line', 0, 0, tipW, 36, 3)
+    GC.translate(tipX + 8, tipY + 4)
     GC.stencil(_tipStencil, 'replace', 1)
     GC.setStencilTest('equal', 1)
-    GC.setColor(.88, .92, .98, .80)
-    GC.draw(tip, scrollX, 4)
+    GC.setColor(.85, .90, .98, .75)
+    GC.draw(tip, scrollX, 0)
     GC.setStencilTest()
     GC.pop()
 end
@@ -489,16 +977,16 @@ end
 function scene.draw()
     local t = TIME()
 
-    -- Demo player (drawn first, behind UI panels)
+    drawBGParticles()
     PLAYERS[1]:draw()
 
-    -- Halloween theme decorations
+    -- Halloween Theme overlay if active
     if THEME.cur == 'halloween' then
         GC.setColor(1,1,1)
-        GC.mDraw(TEXTURE.spiderweb, 820, 50, .26, 1.26)
-        GC.mDraw(TEXTURE.spiderweb, 1050, 94.2, .62)
+        GC.mDraw(TEXTURE.spiderweb,820,50,.26,1.26)
+        GC.mDraw(TEXTURE.spiderweb,1050,94.2,.62)
         GC.setColor(COLOR.O)
-        GC.mDraw(TEXTURE.miniBlock[1], 1126, 90, -.16, 40)
+        GC.mDraw(TEXTURE.miniBlock[1],1126,90,-.16,40)
         GC.setColor(COLOR.lO)
         GC.setLineWidth(12)
         GC.line(1037,25,1032,101)
@@ -514,20 +1002,15 @@ function scene.draw()
             GC.rotate(.162)
             GC.setColor(COLOR.D)
             FONT.set(20)
-            GC.mStr(text.pumpkin, 0, -13)
+            GC.mStr(text.pumpkin,0,-13)
         GC.pop()
     end
 
-    -- Sidebar (drawn over player, under top bar and widgets)
-    drawSidebar(t)
-
-    -- Top bar (drawn over sidebar top)
+    drawKeyHints()
     drawTopBar(t)
+    drawTip()
+    drawOptionsSidebar(t)
 
-    -- Scrolling tip box at bottom
-    drawTip(t)
-
-    -- Halloween flash overlay
     if flash > 0 then
         GC.replaceTransform(SCR.origin)
         GC.setColor(1, 1, 1, flash)
@@ -535,10 +1018,9 @@ function scene.draw()
         GC.replaceTransform(SCR.xOy)
     end
 
-    -- Ranked matchmaking search popup
     if searchPopupAlpha > .01 then
         GC.setColor(COLOR.lY[1], COLOR.lY[2], COLOR.lY[3], searchPopupAlpha * .85)
-        FONT.set(20)
+        FONT.set(18)
         GC.mStr("Ranked match searching...", 790, 648)
         if NET.searchTimer then
             GC.setColor(COLOR.lH[1], COLOR.lH[2], COLOR.lH[3], searchPopupAlpha * .70)
@@ -549,35 +1031,34 @@ end
 
 -- ════════════════════════════════════════════════════════════
 --  WIDGET LIST
---  Note: WIDGET.newButton{x, y} treats x,y as the CENTRE of the
---  button; the stored .x becomes (centre - w/2).  In scene.update
---  we directly overwrite .x with the desired left-edge value.
 -- ════════════════════════════════════════════════════════════
 scene.widgetList = {
-    -- ── Primary navigation (live inside sidebar) ──────────
-    WIDGET.newButton{name='qplay',    x=-200, y=NAV0+0*STRIDE+BH*.5, w=BW, h=BH, color='lR', font=34, align='L', edge=12, code=pressKey'1'},
-    WIDGET.newButton{name='online',   x=-200, y=NAV0+1*STRIDE+BH*.5, w=BW, h=BH, color='lV', font=34, align='L', edge=12, code=pressKey'a'},
-    WIDGET.newButton{name='custom',   x=-200, y=NAV0+2*STRIDE+BH*.5, w=BW, h=BH, color='lS', font=34, align='L', edge=12, code=pressKey'z'},
-    WIDGET.newButton{name='settings', x=-200, y=NAV0+3*STRIDE+BH*.5, w=BW, h=BH, color='lO', font=34, align='L', edge=12, code=pressKey'-'},
-    WIDGET.newButton{name='stat',     x=-200, y=NAV0+4*STRIDE+BH*.5, w=BW, h=BH, color='lL', font=30, align='L', edge=12, code=pressKey'p'},
-    WIDGET.newButton{name='replays',  x=-200, y=NAV0+5*STRIDE+BH*.5, w=BW, h=BH, color='lC', font=30, align='L', edge=12, code=pressKey','},
+    -- Primary Navigation (Always visible on screen)
+    WIDGET.newButton{name='qplay',    x=MENU_X, y=NAV0+0*STRIDE+BH*.5, w=BW, h=BH, color='lR', font=28, align='L', edge=12, code=pressKey'1'},
+    WIDGET.newButton{name='online',   x=MENU_X, y=NAV0+1*STRIDE+BH*.5, w=BW, h=BH, color='lV', font=28, align='L', edge=12, code=pressKey'a'},
+    WIDGET.newButton{name='custom',   x=MENU_X, y=NAV0+2*STRIDE+BH*.5, w=BW, h=BH, color='lS', font=28, align='L', edge=12, code=pressKey'z'},
+    WIDGET.newButton{name='settings', x=MENU_X, y=NAV0+3*STRIDE+BH*.5, w=BW, h=BH, color='lO', font=28, align='L', edge=12, code=function() toggleOptions() end},
+    WIDGET.newButton{name='stat',     x=MENU_X, y=NAV0+4*STRIDE+BH*.5, w=BW, h=BH, color='lL', font=26, align='L', edge=12, code=pressKey'p'},
+    WIDGET.newButton{name='replays',  x=MENU_X, y=NAV0+5*STRIDE+BH*.5, w=BW, h=BH, color='lC', font=26, align='L', edge=12, code=pressKey','},
 
-    -- ── Quick-Play sub-menu (same y-positions, toggled via hide) ──
-    WIDGET.newButton{name='qp_40l',    x=-200, y=NAV0+0*STRIDE+BH*.5, w=BW, h=BH, color='lM', font=30, align='L', edge=12, code=pressKey'q',      hide=true},
-    WIDGET.newButton{name='qp_sprint', x=-200, y=NAV0+1*STRIDE+BH*.5, w=BW, h=BH, color='lM', font=30, align='L', edge=12, code=pressKey'w',      hide=true},
-    WIDGET.newButton{name='qp_lock',   x=-200, y=NAV0+2*STRIDE+BH*.5, w=BW, h=BH, color='lM', font=30, align='L', edge=12, code=pressKey'e',      hide=true},
-    WIDGET.newButton{name='offline',   x=-200, y=NAV0+3*STRIDE+BH*.5, w=BW, h=BH, color='lY', font=30, align='L', edge=12, code=pressKey'r',      hide=true},
-    WIDGET.newButton{name='back',      x=-200, y=NAV0+4*STRIDE+BH*.5, w=BW, h=BH, color='lB', font=30, align='L', edge=12, code=pressKey'escape', hide=true},
+    -- Quick-Play Sub-Menu
+    WIDGET.newButton{name='qp_40l',    x=MENU_X, y=NAV0+0*STRIDE+BH*.5, w=BW, h=BH, color='lM', font=26, align='L', edge=12, code=pressKey'q',      hide=true},
+    WIDGET.newButton{name='qp_sprint', x=MENU_X, y=NAV0+1*STRIDE+BH*.5, w=BW, h=BH, color='lM', font=26, align='L', edge=12, code=pressKey'w',      hide=true},
+    WIDGET.newButton{name='qp_lock',   x=MENU_X, y=NAV0+2*STRIDE+BH*.5, w=BW, h=BH, color='lM', font=26, align='L', edge=12, code=pressKey'e',      hide=true},
+    WIDGET.newButton{name='offline',   x=MENU_X, y=NAV0+3*STRIDE+BH*.5, w=BW, h=BH, color='lY', font=26, align='L', edge=12, code=pressKey'r',      hide=true},
+    WIDGET.newButton{name='back',      x=MENU_X, y=NAV0+4*STRIDE+BH*.5, w=BW, h=BH, color='lB', font=26, align='L', edge=12, code=pressKey'escape', hide=true},
 
-    -- ── Bottom sidebar: About + How-to-play ───────────────
-    WIDGET.newButton{name='about',  x=-200, y=BTM_Y1+BTM_H*.5, w=BTM_W, h=BTM_H, color='lB', align='L', edge=10, code=pressKey'x', font=26, fText=CHAR.icon.info},
-    WIDGET.newButton{name='manual', x=-200, y=BTM_Y2+BTM_H*.5, w=BTM_W, h=BTM_H, color='lR', align='L', edge=10, code=pressKey'h', font=26, fText=CHAR.icon.help},
+    -- Bottom actions
+    WIDGET.newButton{name='about',  x=MENU_X, y=BTM_Y1+BTM_H*.5, w=BTM_W, h=BTM_H, color='lB', align='M', edge=6, code=pressKey'x', font=22, fText=CHAR.icon.info},
+    WIDGET.newButton{name='manual', x=MENU_X+BTM_W+10, y=BTM_Y1+BTM_H*.5, w=BTM_W, h=BTM_H, color='lR', align='M', edge=6, code=pressKey'h', font=22, fText=CHAR.icon.help},
+    WIDGET.newButton{name='quit',   x=MENU_X, y=BTM_Y2+BTM_H*.5, w=BW,    h=BTM_H, color='lH', align='M', edge=6, font=20, fText="Quit Game", code=function() if tryBack() then VOC.play('bye') SCN.back() end end},
 
-    -- ── Top-bar persistent icon buttons (always visible) ──
-    WIDGET.newButton{name='music',  x=TB_ICON_X[1]+TB_ICON_SZ*.5, y=TB_ICON_Y+TB_ICON_SZ*.5, w=TB_ICON_SZ, h=TB_ICON_SZ, color='lY', code=pressKey'2', font=28, fText=CHAR.icon.music},
-    WIDGET.newButton{name='notice', x=TB_ICON_X[2]+TB_ICON_SZ*.5, y=TB_ICON_Y+TB_ICON_SZ*.5, w=TB_ICON_SZ, h=TB_ICON_SZ, color='lG', code=pressKey'3', font=28, fText=CHAR.key.winMenu},
-    WIDGET.newButton{name='lang',   x=TB_ICON_X[3]+TB_ICON_SZ*.5, y=TB_ICON_Y+TB_ICON_SZ*.5, w=TB_ICON_SZ, h=TB_ICON_SZ, color='lN', code=pressKey'4', font=28, fText=CHAR.icon.language},
-    WIDGET.newButton{name='dict',   x=TB_ICON_X[4]+TB_ICON_SZ*.5, y=TB_ICON_Y+TB_ICON_SZ*.5, w=TB_ICON_SZ, h=TB_ICON_SZ, color='lG', code=pressKey'b', font=28, fText=CHAR.icon.zBook},
+    -- Top-bar icon buttons
+    WIDGET.newButton{name='skin',   x=TB_ICON_X[1]+TB_ICON_SZ*.5, y=TB_ICON_Y+TB_ICON_SZ*.5, w=TB_ICON_SZ, h=TB_ICON_SZ, color='lP', code=function() SCN.go('skin_browse') end, font=22, fText=CHAR.mino.T},
+    WIDGET.newButton{name='music',  x=TB_ICON_X[2]+TB_ICON_SZ*.5, y=TB_ICON_Y+TB_ICON_SZ*.5, w=TB_ICON_SZ, h=TB_ICON_SZ, color='lY', code=pressKey'2', font=24, fText=CHAR.icon.music},
+    WIDGET.newButton{name='notice', x=TB_ICON_X[3]+TB_ICON_SZ*.5, y=TB_ICON_Y+TB_ICON_SZ*.5, w=TB_ICON_SZ, h=TB_ICON_SZ, color='lG', code=pressKey'3', font=24, fText=CHAR.key.winMenu},
+    WIDGET.newButton{name='lang',   x=TB_ICON_X[4]+TB_ICON_SZ*.5, y=TB_ICON_Y+TB_ICON_SZ*.5, w=TB_ICON_SZ, h=TB_ICON_SZ, color='lN', code=pressKey'4', font=24, fText=CHAR.icon.language},
+    WIDGET.newButton{name='dict',   x=TB_ICON_X[5]+TB_ICON_SZ*.5, y=TB_ICON_Y+TB_ICON_SZ*.5, w=TB_ICON_SZ, h=TB_ICON_SZ, color='lC', code=pressKey'b', font=24, fText=CHAR.icon.zBook},
 }
 
 return scene

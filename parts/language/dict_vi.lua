@@ -1276,21 +1276,6 @@ Chỉ có chế độ chơi 1 đấu 1 với bot, chủ yếu là chơi theo lư
 Misamino cũng là tên của bot trong game này.
         ]],
     },
-    {"Touhoumino",
-        "nhom06",
-        "game",
-        [[
-Windows | Chơi đơn
-
-Một game Tetris do fan làm. Game này là một bản chỉnh sửa của Nullpomino với các yếu tố được thêm vào từ Touhou Project.
-
-Chế độ Marathon có chứa "Spell Cards" của Touhou Project (thêm hiệu ứng đặc biệt để quấy phá màn chơi), chỉ có thể phá bằng cách đạt được số điểm  yêu cầu trong thời gian có hạn.
-
-[MrZ: Chỉ nên chơi nếu bạn đã có kỹ năng ở mức nào đó*, nếu không, bạn thậm chí không biết mình đã chết như thế nào.]
-
-(*) Bản Zictionary tiếng Anh ghi là: "half-decent skills", dịch sát nghĩa là "một nửa kỹ năng"
-        ]],
-    },
     {"Tetris Blitz",
         "nhom06 blitz ea mobile phone",
         "game",

@@ -41,7 +41,7 @@ return {
     RS='TRS',
     sequence='bag',
     seqData={1,2,3,4,5,6,7},
-    skinSet='Crystal (Scf)',
+    skinSet='Neon Cyber (Teblocks)',
     face=false,skin=false,
     mission=false,
 

@@ -1143,7 +1143,6 @@ C. Gamepad
         {C.C,"Also try Puyo Puyo!"},
         {C.C,"Also try Rubik's cube!"},
         {C.C,"Also try Terraria!"},
-        {C.C,"Also try Touhou Project!"},
         {C.C,"Also try VVVVVV!"},
         {C.C,"Also try World of goo!"},
         {C.C,"Also try Zuma!"},

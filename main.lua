@@ -23,7 +23,7 @@ TIME=love.timer.getTime
 
 -- Global Vars & Settings
 SFXPACKS={'chiptune'}
-VOCPACKS={'miya','mono','xiaoya','flore','neuro','miku','zundamon'}
+VOCPACKS={'miya','mono','xiaoya','flore'}
 FIRSTLAUNCH=false
 DAILYLAUNCH=false
 -- Launch flags (parsed manually: TABLE is loaded later via Zframework)
@@ -293,9 +293,6 @@ IMG.init{
     xiaoyaCH='media/image/characters/xiaoya.png',
     xiaoyaOmino='media/image/characters/xiaoya_Omino.png',
     floreCH='media/image/characters/flore.png',
-    mikuCH='media/image/characters/miku.png',
-    zundamonCH='media/image/characters/zundamon.png',
-    neuroCH='media/image/characters/neuro.png',
     z={
         character='media/image/characters/z_character.png',
         screen1='media/image/characters/z_screen1.png',
@@ -318,41 +315,7 @@ IMG.init{
     },
 }
 SKIN.load{
-    {name="Crystal (Scf)",                  path='media/image/skin/scf/crystal.png'},
-    {name="Smooth (MrZ)",                   path='media/image/skin/mrz/smooth.png'},
-    {name="Matte (MrZ)",                    path='media/image/skin/mrz/matte.png'},
-    {name="Glass (Scf)",                    path='media/image/skin/scf/glass.png'},
-    {name="Jelly (Miya)",                   path='media/image/skin/miya/jelly.png'},
-    {name="Simple (Scf)",                   path='media/image/skin/scf/simple.png'},
-    {name="Contrast (MrZ)",                 path='media/image/skin/mrz/contrast.png'},
-    {name="Plastic (MrZ)",                  path='media/image/skin/mrz/plastic.png'},
-    {name="Glow (MrZ)",                     path='media/image/skin/mrz/glow.png'},
-    {name="Bright (Scf)",                   path='media/image/skin/scf/bright.png'},
-    {name="Penta (Scf)",                    path='media/image/skin/scf/penta.png'},
-    {name="Bubble (Scf)",                   path='media/image/skin/scf/bubble.png'},
-    {name="Pure (MrZ)",                     path='media/image/skin/mrz/pure.png'},
-    {name="Letters (CHNO)",                 path='media/image/skin/chno/letters.png'},
-    {name="Kanji (CHNO)",                   path='media/image/skin/chno/kanji.png'},
-    {name="Pastel (CHNO)",                  path='media/image/skin/chno/pastel.png'},
-    {name="Classic",                        path='media/image/skin/unknown/classic.png'},
-    {name="Arcade (Asriel)",                path='media/image/skin/asriel/arcade.png'},
-    {name="Shiny (CHNO)",                   path='media/image/skin/chno/shiny.png'},
-    {name="Brick (Notypey)",                path='media/image/skin/notypey/brick.png'},
-    {name="Cartooncup (Earety)",            path='media/image/skin/earety/cartooncup.png'},
-    {name="Paper (MrZ)",                    path='media/image/skin/mrz/paper.png'},
-    {name="Toy (Scf)",                      path='media/image/skin/scf/toy.png'},
-    {name="Polkadots (Scf)",                path='media/image/skin/scf/polkadots.png'},
-    {name="Yinyang (Scf)",                  path='media/image/skin/scf/yinyang.png'},
-    {name="Minoes (Scf)",                   path='media/image/skin/scf/minoes.png'},
-    {name="Cardboard (Asriel, slimenergy)", path='media/image/skin/asriel/cardboard.png'},
-    {name="Ball (Shaw)",                    path='media/image/skin/shaw/ball.png'},
-    {name="Gem (Notypey)",                  path='media/image/skin/notypey/gem.png'},
-    {name="Pixel (CHNO)",                   path='media/image/skin/chno/pixel.png'},
-    {name="Retro (Notypey)",                path='media/image/skin/notypey/retro.png'},
-    {name="Guidetris (xmiao, lusisi)",      path='media/image/skin/guidetris_xmiao_lusisi.png'},
-    {name="Textbone (MrZ)",                 path='media/image/skin/mrz/textbone.png'},
-    {name="Coloredbone (MrZ)",              path='media/image/skin/mrz/coloredbone.png'},
-    {name="WTF (MrZ)",                      path='media/image/skin/mrz/wtf.png'},
+    {name="Neon Cyber (Teblocks)",          path='media/image/skin/teblocks/neon_cyber.png'},
 }
 
 SKIN.loadUser('skins')
@@ -467,15 +430,15 @@ do
     for _,v in next,SETTING.skin do if v<1 or v>17 then v=17 end end
     if not RSlist[SETTING.RS] then SETTING.RS='TRS' end
     if SETTING.ghostType=='greyCell' then SETTING.ghostType='grayCell' end
-    if type(SETTING.skinSet)=='number' then SETTING.skinSet='Crystal (Scf)' end
-    if string.find(SETTING.skinSet,"_") then SETTING.skinSet='Crystal (Scf)' end
+    if type(SETTING.skinSet)=='number' or not TABLE.find(SKIN.getList(), SETTING.skinSet) then SETTING.skinSet='Neon Cyber (Teblocks)' end
+    if string.find(SETTING.skinSet,"_") then SETTING.skinSet='Neon Cyber (Teblocks)' end
     if not TABLE.find({8,10,13,17,22,29,37,47,62,80,100},SETTING.frameMul) then SETTING.frameMul=100 end
     if SETTING.cv then SETTING.vocPack,SETTING.cv=SETTING.cv end
     if type(SETTING.bg)~='string' then SETTING.bg='on' end
     if SETTING.skin[18]==10 then SETTING.skin[18]=4 end
     if SETTING.reTime>3 or SETTING.reTime<.5 then SETTING.reTime=2 end
     if SETTING.locale=='zh_full' then SETTING.locale='zh' end
-    if SETTING.vocPack=='rin' then SETTING.vocPack='miku' end
+    if SETTING.vocPack=='rin' or SETTING.vocPack=='miku' or SETTING.vocPack=='neuro' or SETTING.vocPack=='zundamon' then SETTING.vocPack='miya' end
     if SETTING.msaa>4 then SETTING.msaa=4 end
     if RANKS.infinite then RANKS.infinite=0 end
     if RANKS.infinite_dig then RANKS.infinite_dig=0 end
@@ -649,6 +612,9 @@ else
 end
 HTTP.setHost(SERVER_HOST)
 HTTP.setThreadCount(1)
+
+-- Connect to gameserver on startup
+NET.startupConnect()
 
 -- Discord RPC
 DiscordRPC=require'parts.discordRPC'

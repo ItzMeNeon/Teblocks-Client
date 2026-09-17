@@ -98,7 +98,7 @@ function THEME.set(theme,keepBGM)
         BGM.setDefault('how feeling')
     elseif theme=='edm' then
         BG.setDefault('lightning2')
-        BGM.setDefault('malate')
+        BGM.setDefault('distortion')
         MES.new('music',"                    红  色  电  音\n                 极  地  大  冲  击\n        只要你敢触电——\n           7月14日、15日 天地人间完全放电\n不用麻醉，一样情不自禁HI起来，飞起来")
     else
         return

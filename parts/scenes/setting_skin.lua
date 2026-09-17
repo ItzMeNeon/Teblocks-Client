@@ -86,8 +86,8 @@ end
 scene.widgetList={
     WIDGET.newText{name='title',      x=80,y=50,lim=500,font=70,align='L'},
 
-    WIDGET.newSelector{name='skinSet',x=780,y=100,w=320,list=SKIN.getList(),disp=SETval('skinSet'),code=SETsto('skinSet')},
-    WIDGET.newButton{name='skinRefresh',x=1140,y=100,w=80,h=65,color='lJ',font=35,sound='rotate',fText="↻",code=function()
+    WIDGET.newSelector{name='skinSet',x=670,y=100,w=280,list=SKIN.getList(),disp=SETval('skinSet'),code=SETsto('skinSet')},
+    WIDGET.newButton{name='skinRefresh',x=970,y=100,w=60,h=65,color='lJ',font=35,sound='rotate',fText="↻",code=function()
         SKIN.reloadUser('skins')
         local list=SKIN.getList()
         scene.widgetList.skinSet.list=list
@@ -98,6 +98,7 @@ scene.widgetList={
             SETsto('skinSet')(list[scene.widgetList.skinSet.select],scene.widgetList.skinSet.select)
         end
     end},
+    WIDGET.newButton{name='skinDirect',x=1050,y=100,w=180,h=65,color='lP',font=20,fText="Skin Direct",code=function() SCN.go('skin_browse') end},
     WIDGET.newButton{name='prev1',    x=130,y=220,w=80,h=65,sound='hold',font=40,fText="↑",code=function() _prevSkin(1) end},
     WIDGET.newButton{name='prev2',    x=270,y=220,w=80,h=65,sound='hold',font=40,fText="↑",code=function() _prevSkin(2) end},
     WIDGET.newButton{name='prev3',    x=410,y=220,w=80,h=65,sound='hold',font=40,fText="↑",code=function() _prevSkin(3) end},

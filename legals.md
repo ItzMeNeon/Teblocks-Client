@@ -48,6 +48,4 @@ Linux is a registered trademark of Linus Torvalds.
 
 Google is a registered trademark of Google LLC.
 
-Touhou Project © Team Shanghai Alice 2002–2022.
-
 All other trademarks, logos, and copyrights are the properties of their respective owners.

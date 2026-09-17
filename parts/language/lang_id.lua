@@ -1050,7 +1050,6 @@ return {
         {C.C,"Coba juga Puyo Puyo!"},
         {C.C,"Coba juga Rubik's cube!"},
         {C.C,"Coba juga Terraria!"},
-        {C.C,"Coba juga Touhou Project!"},
         {C.C,"Coba juga VVVVVV!"},
         {C.C,"Coba juga World of goo!"},
         {C.C,"Coba juga Zuma!"},

@@ -1400,9 +1400,19 @@ function NET.wsCallBack.input_hash()
     -- Server -> client is not expected; this is a C->S message only. Ignore.
 end
 
+function NET.startupConnect()
+    if WS.status('game') ~= 'dead' then return end
+    TASK.new(function()
+        if USER.aToken and not USER.oToken then
+            USER.oToken = USER.aToken
+        end
+        NET.ws_connect()
+    end)
+end
+
 function NET.ws_connect()
     if WS.status('game')=='dead' then
-        WS.connect('game','',{['x-access-token']=USER.oToken},6)
+        WS.connect('game','',{['x-access-token']=USER.oToken or ''},6)
         TASK.removeTask_code(NET.ws_update)
         TASK.new(NET.ws_update)
     end
@@ -1415,18 +1425,18 @@ function NET.ws_update()
     while true do
         TEST.yieldT(1/26)
         if WS.status('game')=='dead' then
-            USER.aToken=false
-            USER.oToken=false
-            TEST.yieldUntilNextScene()
-            GAME.playing=false
-            SCN.backTo('main')
+            if SCN.cur and (SCN.cur:sub(1,3)=='net' or SCN.cur=='lobby') then
+                TEST.yieldUntilNextScene()
+                GAME.playing=false
+                SCN.backTo('main')
+            end
             return
         elseif WS.status('game')=='running' then
             break
         end
     end
 
-    do-- Get UID
+    if USER.oToken then
         local res=getMsg({
             pool='getUID',
             path='/api/auth/check',
@@ -1442,18 +1452,22 @@ function NET.ws_update()
                 USERS.updateUsername(USER.uid,res.data.username)
             end
             saveUser()
-        else
-            TEST.yieldUntilNextScene()
-            GAME.playing=false
-            SCN.backTo('main')
-            return
+            -- Initialize player setting
+            NET.player_updateConf()
+            -- Sync our competitive elo/rank from the server (persists across restarts).
+            NET.getUserInfo(USER.uid)
+        elseif res and res.code==401 then
+            USER.aToken=false
+            USER.oToken=false
+            saveUser()
+            if SCN.cur and (SCN.cur:sub(1,3)=='net' or SCN.cur=='lobby') then
+                TEST.yieldUntilNextScene()
+                GAME.playing=false
+                SCN.backTo('main')
+                return
+            end
         end
     end
-
-    -- Initialize player setting
-    NET.player_updateConf()
-    -- Sync our competitive elo/rank from the server (persists across restarts).
-    NET.getUserInfo(USER.uid)
 
     -- Websocket main loop
     local updateOnlineCD=0
@@ -1461,9 +1475,11 @@ function NET.ws_update()
         TEST.yieldT(.01)-- Network messages, max 126 FPS is enough
 
         if WS.status('game')=='dead' then
-            TEST.yieldUntilNextScene()
-            GAME.playing=false
-            SCN.backTo('main')
+            if SCN.cur and (SCN.cur:sub(1,3)=='net' or SCN.cur=='lobby') then
+                TEST.yieldUntilNextScene()
+                GAME.playing=false
+                SCN.backTo('main')
+            end
             return
         end
 
