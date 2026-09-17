@@ -112,7 +112,15 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           cd love-android
-          ./gradlew assembleEmbedRelease
+          # love-android flavors are EmbedRecord / EmbedNoRecord (mic permission) x Debug/Release.
+          # TeBlocks doesn't need mic access, so we build EmbedNoRecordRelease.
+          # Output: app/build/outputs/apk/embedNoRecord/release/*.apk (unsigned unless a signingConfig is wired in).
+          ./gradlew assembleEmbedNoRecordRelease --stacktrace
+
+      - name: Inspect build directory (debug)
+        run: |
+          echo "--- app/build contents (2 levels) ---"
+          find love-android/app/build -maxdepth 3 2>/dev/null || echo "love-android/app/build does not exist at all"
 
       - name: List APK outputs (debug)
         run: |
