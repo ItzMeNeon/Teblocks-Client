@@ -18,10 +18,8 @@ jobs:
 
       - name: Build .love file
         run: |
-          # Adjust "src" to wherever main.lua actually lives in the repo
-          cd src
-          zip -9 -r ../teblocks.love . -x "*.git*" -x "*.DS_Store"
-          cd ..
+          zip -9 -r teblocks.love . \
+            -x ".git/*" -x ".github/*" -x "*.DS_Store" -x "dist/*"
 
       - name: Package Linux (AppImage + .love)
         run: |
@@ -87,9 +85,10 @@ jobs:
 
       - name: Build .love file
         run: |
-          cd teblocks-src/src
-          zip -9 -r ../../teblocks.love . -x "*.git*" -x "*.DS_Store"
-          cd ../..
+          cd teblocks-src
+          zip -9 -r ../teblocks.love . \
+            -x ".git/*" -x ".github/*" -x "*.DS_Store" -x "dist/*"
+          cd ..
 
       - name: Embed .love into love-android
         run: |
