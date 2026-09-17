@@ -2,15 +2,47 @@ name: Release Build
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 env:
   LOVE_VERSION: "11.5"
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.compute.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version tag (v{date}-b{N})
+        id: compute
+        run: |
+          DATE=$(date -u +%Y.%m.%d)
+          # Count existing tags for today's date to find the next build number
+          EXISTING=$(git tag -l "v${DATE}-b*" | wc -l)
+          N=$((EXISTING + 1))
+          TAG="v${DATE}-b${N}"
+          echo "Computed tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.compute.outputs.tag }}"
+          git push origin "${{ steps.compute.outputs.tag }}"
+
   desktop:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -59,6 +91,7 @@ jobs:
           retention-days: 7
 
   android:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - name: Checkout love-android
@@ -146,7 +179,7 @@ jobs:
           retention-days: 7
 
   release:
-    needs: [desktop, android]
+    needs: [version, desktop, android]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -155,8 +188,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
           files: |
             desktop-builds/teblocks-linux.zip
             desktop-builds/teblocks-windows.zip
             android-build/teblocks-android.apk
           generate_release_notes: true
+
