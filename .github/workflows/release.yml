@@ -112,18 +112,25 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           # ubuntu-latest ships with the Android SDK preinstalled; no setup-android action needed.
 
-      - name: Rename app label to TeBlocks
+      - name: Override app identity via gradle.properties
         run: |
-          # love-android's default label is "LOVE for Android" — override it wherever it's declared.
-          grep -rl "LOVE for Android" love-android/app/src --include="*.xml" | while read -r f; do
-            sed -i 's/LOVE for Android/TeBlocks/g' "$f"
-            echo "Patched: $f"
-          done
+          # love-android reads app name/id/version from gradle.properties, NOT strings.xml —
+          # these are injected into AndroidManifest.xml via manifestPlaceholders at build time.
+          cat > love-android/gradle.properties << EOF
+          app.name=TeBlocks
+          app.application_id=my.id.teblocks.android
+          app.orientation=portrait
+          app.version_code=${{ github.run_number }}
+          app.version_name=${{ needs.version.outputs.tag }}
 
-      - name: Verify noCompress for .love assets (debug)
-        run: |
-          echo "--- Searching for aaptOptions/androidResources noCompress in build.gradle files ---"
-          grep -rn "noCompress" love-android/app/build.gradle* || echo "WARNING: no noCompress directive found — .love may get compressed and fail to load at runtime"
+          android.enableJetifier=false
+          android.useAndroidX=true
+          android.defaults.buildfeatures.buildconfig=true
+          android.nonTransitiveRClass=true
+          android.nonFinalResIds=true
+          EOF
+          echo "--- Patched gradle.properties ---"
+          cat love-android/gradle.properties
 
       - name: Build .love file
         run: |
@@ -209,6 +216,15 @@ jobs:
             dist/teblocks-aligned.apk
 
           "$APKSIGNER" verify dist/teblocks-android.apk && echo "APK signature verified OK"
+
+      - name: Verify final APK contents (debug)
+        run: |
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name "aapt" | sort -V | tail -n 1)
+          echo "--- Package / label / version from built APK ---"
+          "$AAPT" dump badging dist/teblocks-android.apk | grep -E "package:|application-label:|launchable-activity:"
+          echo ""
+          echo "--- Confirming game.love is present inside the APK ---"
+          "$AAPT" list dist/teblocks-android.apk | grep "game.love" || echo "WARNING: game.love NOT found inside the built APK!"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
