@@ -142,7 +142,7 @@ jobs:
           cat > love-android/gradle.properties << EOF
           app.name=TeBlocks
           app.application_id=my.id.teblocks.android
-          app.orientation=portrait
+          app.orientation=sensorLandscape
           app.version_code=${{ github.run_number }}
           app.version_name=${{ needs.version.outputs.tag }}
 

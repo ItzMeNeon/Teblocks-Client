@@ -248,13 +248,17 @@ function REG_CONFIRM.mouseClick(x, y)
     return true
 end
 
+REG_CONFIRM.mouseDown = REG_CONFIRM.mouseClick
+REG_CONFIRM.touchDown = REG_CONFIRM.mouseClick
+REG_CONFIRM.touchClick = REG_CONFIRM.mouseClick
+
 function REG_CONFIRM.keyDown(key, rep)
     if not _isOpen then return false end
 
-    if key == 'escape' and not rep then
+    if (key == 'escape' or key == 'back') and not rep then
         _close()
         SFX.play('back')
-        return true
+        return false
     elseif (key == 'return' or key == 'kpenter') and not rep then
         local cb = onAgreeCb
         _close()
@@ -266,10 +270,10 @@ function REG_CONFIRM.keyDown(key, rep)
             love.system.openURL(baseWeb .. "/register")
             MES.new('check', "Opening registration page in web browser...")
         end
-        return true
+        return false
     end
 
-    return true
+    return false
 end
 
 return REG_CONFIRM

@@ -76,10 +76,10 @@ function SCN.init(s)
     SCN.mouseUp=S.mouseUp
     SCN.mouseClick=S.mouseClick
     SCN.wheelMoved=S.wheelMoved
-    SCN.touchDown=S.touchDown
-    SCN.touchUp=S.touchUp
+    SCN.touchDown=S.touchDown or S.mouseDown
+    SCN.touchUp=S.touchUp or S.mouseUp
     SCN.touchMove=S.touchMove
-    SCN.touchClick=S.touchClick
+    SCN.touchClick=S.touchClick or S.mouseClick
     SCN.keyDown=S.keyDown
     SCN.keyUp=S.keyUp
     SCN.textInput=S.textInput

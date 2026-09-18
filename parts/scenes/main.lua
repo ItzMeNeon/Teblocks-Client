@@ -499,6 +499,7 @@ function scene.mouseClick(x, y)
     if AUTH.isOpen() and AUTH.mouseClick(x, y) then return true end
     return false
 end
+scene.touchClick = scene.mouseClick
 
 function scene.textInput(t)
     if REG_CONFIRM.isOpen() then return true end
@@ -506,11 +507,13 @@ function scene.textInput(t)
 end
 
 function scene.mouseDown(x, y)
-    -- Modal input interactions: block background clicks when open
+    -- Modal input interactions: forward clicks to active modal and consume event
     if REG_CONFIRM.isOpen() then
+        REG_CONFIRM.mouseClick(x, y)
         return true
     end
     if AUTH.isOpen() then
+        AUTH.mouseClick(x, y)
         return true
     end
 
@@ -813,26 +816,32 @@ local function _testButton(W)
 end
 
 function scene.keyDown(key, isRep)
-    if REG_CONFIRM.isOpen() and REG_CONFIRM.keyDown(key, isRep) then return true end
-    if AUTH.isOpen() and AUTH.keyDown(key, isRep) then return true end
-    if isRep then return true end
+    if REG_CONFIRM.isOpen() then
+        REG_CONFIRM.keyDown(key, isRep)
+        return false
+    end
+    if AUTH.isOpen() then
+        AUTH.keyDown(key, isRep)
+        return false
+    end
+    if isRep then return false end
 
-    -- Options sidebar closes on escape
-    if optTarget == 1 and (key == 'escape' or key == 'backspace') then
+    -- Options sidebar closes on escape or Android back
+    if optTarget == 1 and (key == 'escape' or key == 'back' or key == 'backspace') then
         toggleOptions(false)
-        return
+        return false
     end
 
-    -- Close profile dropdown menu on escape
-    if profMenuOpen and (key == 'escape' or key == 'backspace') then
+    -- Close profile dropdown menu on escape or Android back
+    if profMenuOpen and (key == 'escape' or key == 'back' or key == 'backspace') then
         profMenuOpen = false
-        return true
+        return false
     end
 
     -- Toggle profile menu on enter
     if optTarget == 0 and (key == 'return' or key == 'kpenter') then
         profMenuOpen = not profMenuOpen
-        return true
+        return false
     end
 
     if submenu then
@@ -840,7 +849,9 @@ function scene.keyDown(key, isRep)
         elseif key == 'w'                         then if _testButton(scene.widgetList.qp_sprint) then loadGame('sprint_100l', true) end
         elseif key == 'e'                         then if _testButton(scene.widgetList.qp_lock)   then loadGame('sprintLock', true) end
         elseif key == 'r'                         then if _testButton(scene.widgetList.offline)   then SCN.go('mode') end
-        elseif key == 'escape' or key == 'backspace' then if _testButton(scene.widgetList.back)  then setSubmenu(false) end
+        elseif key == 'escape' or key == 'back' or key == 'backspace' then
+            if _testButton(scene.widgetList.back) then setSubmenu(false) end
+            return false
         else return true
         end
     else
@@ -880,8 +891,9 @@ function scene.keyDown(key, isRep)
             end
         elseif key == 'b'      then if _testButton(scene.widgetList.dict)     then SCN.go('dict') end
         elseif key == 'c'      then enterConsole()
-        elseif key == 'escape' then
+        elseif key == 'escape' or key == 'back' then
             if tryBack() then VOC.play('bye') SCN.back() end
+            return false
         else return true
         end
     end

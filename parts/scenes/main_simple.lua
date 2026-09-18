@@ -1,4 +1,5 @@
 local scene = {}
+local AUTH = require 'parts.authModal'
 
 --[[
     MAIN_SIMPLE SCENE - Minimalist, Modern Block-Themed Menu
@@ -80,10 +81,15 @@ function scene.enter()
     DiscordRPC.update("In Simple Menu")
 end
 
+function scene.leave()
+    AUTH.close()
+end
+
 -- ════════════════════════════════════════════════════════════
 --  KEYBOARD HANDLER
 -- ════════════════════════════════════════════════════════════
 function scene.keyDown(key, isRep)
+    if AUTH.isOpen() then return AUTH.keyDown(key, isRep) end
     if isRep then return true end
 
     -- Ctrl+T: switch back to the full UI (main scene)
@@ -92,21 +98,41 @@ function scene.keyDown(key, isRep)
         for i = #SCN.stack, 1, -1 do SCN.stack[i] = nil end
         SCN.stack[1] = 'main'
         SCN.swapTo('main', 'fade')
-        return
+        return false
     end
 
-    if key == 'escape' then
+    if key == 'escape' or key == 'back' then
         if tryBack() then VOC.play('bye') SCN.back() end
+        return false
     else
         return true
     end
 end
+
+function scene.textInput(t)
+    if AUTH.isOpen() and AUTH.textInput(t) then return true end
+end
+
+function scene.mouseDown(x, y)
+    if AUTH.isOpen() then
+        AUTH.mouseClick(x, y)
+        return true
+    end
+end
+scene.touchDown = scene.mouseDown
+
+function scene.mouseClick(x, y)
+    if AUTH.isOpen() and AUTH.mouseClick(x, y) then return true end
+end
+scene.touchClick = scene.mouseClick
 
 -- ════════════════════════════════════════════════════════════
 --  UPDATE
 -- ════════════════════════════════════════════════════════════
 function scene.update(dt)
     if dt > .26 then return end
+
+    AUTH.update(dt)
 
     scrollX = scrollX - 120 * dt
     if scrollX < -tip:getWidth() then
@@ -207,6 +233,7 @@ function scene.draw()
     drawBackground()
     drawTopBar()
     drawTip()
+    AUTH.draw()
 end
 
 -- ════════════════════════════════════════════════════════════

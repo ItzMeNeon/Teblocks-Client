@@ -31,6 +31,7 @@ local function _close()
     focusedField="username"
     love.keyboard.setTextInput(false)
     WIDGET.unFocus(true)
+    WIDGET.locked=false
 end
 
 local function _getFieldRect(fieldName)
@@ -178,7 +179,7 @@ function AUTH.mouseClick(x,y)
     local fields={'username','password'}
     for _,fieldName in ipairs(fields) do
         local fx,fy,fw,fh=_getFieldRect(fieldName)
-        if fx and _pointInRect(x,y,fx,fy,fw,fh) then
+        if fx and _pointInRect(x,y,fx-6,fy-6,fw+12,fh+12) then
             focusedField=fieldName
             love.keyboard.setTextInput(true)
             return true
@@ -186,13 +187,13 @@ function AUTH.mouseClick(x,y)
     end
 
     local submitX,submitY,submitW,submitH=_getButtonRect('submit')
-    if submitX and _pointInRect(x,y,submitX,submitY,submitW,submitH) then
+    if submitX and _pointInRect(x,y,submitX-8,submitY-8,submitW+16,submitH+16) then
         AUTH._submit()
         return true
     end
 
     local closeX,closeY,closeW,closeH=_getButtonRect('close')
-    if closeX and _pointInRect(x,y,closeX,closeY,closeW,closeH) then
+    if closeX and _pointInRect(x,y,closeX-8,closeY-8,closeW+16,closeH+16) then
         _close()
         return true
     end
@@ -207,20 +208,22 @@ function AUTH.mouseClick(x,y)
         return true
     end
 
-    -- Prevent clicks outside the modal from closing it in fullscreen
-    -- where coordinate transforms can be unreliable
     return true
 end
+
+AUTH.mouseDown = AUTH.mouseClick
+AUTH.touchDown = AUTH.mouseClick
+AUTH.touchClick = AUTH.mouseClick
 
 function AUTH.keyDown(key,rep)
     if not _isOpen then return nil end
 
-    if key=='escape' and not rep then
+    if (key=='escape' or key=='back') and not rep then
         _close()
-        return true
+        return false
     elseif (key=='return' or key=='kpenter') and not rep then
         AUTH._submit()
-        return true
+        return false
     elseif key=='tab' and not rep then
         local fields={'username','password'}
         for i,fieldName in ipairs(fields) do
@@ -229,17 +232,27 @@ function AUTH.keyDown(key,rep)
                 break
             end
         end
-        return true
+        return false
     elseif key=='backspace' then
         if focusedField=='username' then
-            username=username:sub(1,-2)
+            local t=username
+            local p=#t
+            while p>0 and t:byte(p)>=128 and t:byte(p)<192 do
+                p=p-1
+            end
+            username=t:sub(1,p-1)
         elseif focusedField=='password' then
-            password=password:sub(1,-2)
+            local t=password
+            local p=#t
+            while p>0 and t:byte(p)>=128 and t:byte(p)<192 do
+                p=p-1
+            end
+            password=t:sub(1,p-1)
         end
-        return true
+        return false
     end
 
-    return true
+    return false
 end
 
 function AUTH.textInput(t)

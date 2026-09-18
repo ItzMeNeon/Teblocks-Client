@@ -74,7 +74,7 @@ function scene.leave()
 end
 
 function scene.keyDown(key,rep)
-    if AUTH.isOpen() and AUTH.keyDown(key,rep) then return true end
+    if AUTH.isOpen() then return AUTH.keyDown(key,rep) end
     if TASK.getLock('enterRoom') then return true end
     if key=='r' then
         if fetchTimer<=7 then
@@ -98,10 +98,19 @@ function scene.textInput(t)
     if AUTH.isOpen() and AUTH.textInput(t) then return true end
 end
 
+function scene.mouseDown(x,y)
+    if AUTH.isOpen() then
+        AUTH.mouseClick(x,y)
+        return true
+    end
+end
+scene.touchDown = scene.mouseDown
+
 function scene.mouseClick(x,y)
     if AUTH.mouseClick(x,y) then return true end
     if CARD.mouseClick(x,y) then return true end
 end
+scene.touchClick = scene.mouseClick
 
 function scene.update(dt)
     CARD.update(dt)

@@ -621,7 +621,7 @@ do-- Userdata tables
         fine=false,
         autoSave=false,
         simpMode=false,
-        uiScale=1.0,
+        uiScale=MOBILE and 1.15 or 1.0,
         sysCursor=true,
         maxFPS=60,
         frameMul=100,

@@ -42,9 +42,9 @@ function scene.leave()
 end
 
 function scene.keyDown(key,rep)
-    if AUTH.isOpen() and AUTH.keyDown(key,rep) then return true end
+    if AUTH.isOpen() then return AUTH.keyDown(key,rep) end
     if LOBBY.keyDown(key) then return true end
-    if key=='escape' and not rep then
+    if (key=='escape' or key=='back') and not rep then
         if LOBBY.isAnyOpen() then
             if LOBBY.chat and LOBBY.chat.visible then LOBBY.chat:toggle() end
             if LOBBY.playerList and LOBBY.playerList.visible then LOBBY.playerList:toggle() end
@@ -62,11 +62,20 @@ function scene.textInput(t)
     if LOBBY.textInput(t) then return true end
 end
 
+function scene.mouseDown(x,y)
+    if AUTH.isOpen() then
+        AUTH.mouseClick(x,y)
+        return true
+    end
+end
+scene.touchDown = scene.mouseDown
+
 function scene.mouseClick(x,y)
     if CARD.mouseClick(x,y) then return true end
     if AUTH.mouseClick(x,y) then return true end
     if LOBBY.mouseClick(x,y) then return true end
 end
+scene.touchClick = scene.mouseClick
 
 function scene.update(dt)
     CARD.update(dt)
