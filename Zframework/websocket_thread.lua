@@ -47,7 +47,7 @@ do-- Connect
         res,err=SOCK:receive('*l')
         -- print('H',res,err)
         assert(res,err)
-        if not ctLen and res:find('content-length') then
+        if not ctLen and res:lower():find('content%-length') then
             ctLen=tonumber(res:match('%d+')) or 0
         end
     until res==''
@@ -55,16 +55,18 @@ do-- Connect
     -- Result
     if code=='101' then
         CHN_push(readCHN,'success')
-    end
-
-    -- Content(?)
-    if ctLen then
-        res,err=SOCK:receive(ctLen)
-        -- print('R',res,err)
-        if code~='101' then
-            res=JSON.decode(assert(res,err))
-            error((code or "XXX")..":"..(res and res.reason or "Server Error"))
+    else
+        local body = ""
+        if ctLen and ctLen > 0 then
+            body = SOCK:receive(ctLen) or ""
         end
+        local reason = body
+        local ok, parsed = pcall(JSON.decode, body)
+        if ok and type(parsed) == 'table' and parsed.reason then
+            reason = parsed.reason
+        end
+        if reason == "" then reason = "HTTP status " .. tostring(code) end
+        error((code or "XXX")..":"..reason)
     end
 
     SOCK:settimeout(0)

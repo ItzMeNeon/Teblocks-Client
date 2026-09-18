@@ -30,7 +30,8 @@ end
 function scene.draw()
     local t=TIME()
     gc.setColor(1,1,1)
-    local texture=SKIN.lib[SETTING.skinSet]
+    local texture=SKIN.get(SETTING.skinSet)
+    if not texture then return end
     for n=1,7 do
         gc.push('transform')
         gc.translate(-10+140*n,330)
@@ -40,7 +41,7 @@ function scene.draw()
         local x,y=-45-selRS.centerPos[n][0][2]*30,15+selRS.centerPos[n][0][1]*30
         local col=#B[1]
         for i=1,#B do for j=1,col do
-            if B[i][j] then
+            if B[i][j] and texture[color] then
                 gc.draw(texture[color],x+30*j,y-30*i)
             end
         end end
@@ -50,9 +51,13 @@ function scene.draw()
         gc.pop()
     end
     for i=1,5 do
-        gc.draw(texture[19+i],570+60*i,610+sin(2.6*t-i)*5,nil,2)
+        if texture[19+i] then
+            gc.draw(texture[19+i],570+60*i,610+sin(2.6*t-i)*5,nil,2)
+        end
     end
-    gc.draw(texture[17],930,610+sin(2.6*t-6)*5,nil,2)
+    if texture[8] then
+        gc.draw(texture[8],930,610+sin(2.6*t-6)*5,nil,2)
+    end
 end
 
 local function _prevSkin(i)
@@ -99,13 +104,7 @@ scene.widgetList={
         end
     end},
     WIDGET.newButton{name='skinDirect',x=1050,y=100,w=180,h=65,color='lP',font=20,fText="Skin Direct",code=function()
-        if not (USER and USER.uid and USER.uid ~= false) then
-            MES.new('warn', "Please log in to access Skin Direct")
-            local AUTH = require 'parts.authModal'
-            AUTH.open('login')
-        else
-            SCN.go('skin_browse')
-        end
+        SCN.go('skin_browse')
     end},
     WIDGET.newButton{name='prev1',    x=130,y=220,w=80,h=65,sound='hold',font=40,fText="↑",code=function() _prevSkin(1) end},
     WIDGET.newButton{name='prev2',    x=270,y=220,w=80,h=65,sound='hold',font=40,fText="↑",code=function() _prevSkin(2) end},
@@ -133,7 +132,7 @@ scene.widgetList={
 
     WIDGET.newButton{name='skinR',    x=200,y=640,w=220,h=80,color='lV',font=35,sound='back',
         code=function()
-            SETTING.skin={1,7,11,3,14,4,9,1,7,2,6,10,2,13,5,9,15,10,11,3,10,2,16,8,4,10,13,2,8}
+            SETTING.skin={1,2,3,4,5,6,7,1,2,9,11,13,9,15,10,7,16,6,3,4,14,9,17,12,6,13,15,9,12}
             SFX.play('rotate')
         end},
     WIDGET.newButton{name='faceR',    x=480,y=640,w=220,h=80,color='lR',font=35,sound='back',

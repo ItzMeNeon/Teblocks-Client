@@ -427,7 +427,22 @@ do
     end
     SETTING.appLock,SETTING.dataSaving,SETTING.swap,SETTING.autoLogin=nil
     if not SETTING.VKSkin then SETTING.VKSkin=1 end
-    for _,v in next,SETTING.skin do if v<1 or v>17 then v=17 end end
+    -- Migrate legacy skin color indices to new simplified 1:1 piece layout
+    if SETTING.skin[2] == 7 and SETTING.skin[3] == 11 and SETTING.skin[7] == 9 then
+        local oldToNew = {
+            [1]=1,  [2]=9,  [3]=4,  [4]=6,  [5]=10, [6]=11, [7]=2,  [8]=12,
+            [9]=7,  [10]=13, [11]=3, [12]=14, [13]=15, [14]=5, [15]=16, [16]=17,
+            [17]=8, [18]=18, [19]=19, [20]=20, [21]=21, [22]=22, [23]=23, [24]=24,
+        }
+        for k, v in ipairs(SETTING.skin) do
+            SETTING.skin[k] = oldToNew[v] or v
+        end
+    end
+    for i, v in ipairs(SETTING.skin) do
+        if v < 1 or v > 24 then
+            SETTING.skin[i] = (i <= 7) and i or 8
+        end
+    end
     if not RSlist[SETTING.RS] then SETTING.RS='TRS' end
     if SETTING.ghostType=='greyCell' then SETTING.ghostType='grayCell' end
     if type(SETTING.skinSet)=='number' or not TABLE.find(SKIN.getList(), SETTING.skinSet) then SETTING.skinSet='Neon Cyber (Teblocks)' end
@@ -435,7 +450,7 @@ do
     if not TABLE.find({8,10,13,17,22,29,37,47,62,80,100},SETTING.frameMul) then SETTING.frameMul=100 end
     if SETTING.cv then SETTING.vocPack,SETTING.cv=SETTING.cv end
     if type(SETTING.bg)~='string' then SETTING.bg='on' end
-    if SETTING.skin[18]==10 then SETTING.skin[18]=4 end
+    if SETTING.skin[18]==13 or SETTING.skin[18]==10 then SETTING.skin[18]=6 end
     if SETTING.reTime>3 or SETTING.reTime<.5 then SETTING.reTime=2 end
     if SETTING.locale=='zh_full' then SETTING.locale='zh' end
     if SETTING.vocPack=='rin' or SETTING.vocPack=='miku' or SETTING.vocPack=='neuro' or SETTING.vocPack=='zundamon' then SETTING.vocPack='miya' end

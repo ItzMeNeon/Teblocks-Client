@@ -133,19 +133,11 @@ local function getMsg(request,timeout)
         local msg=HTTP.pollMsg(request.pool)
         if msg then
             if type(msg.body)=='string' and #msg.body>0 then
-                if msg.code and tostring(msg.code):sub(1,1)~='2' then
-                    local errMsg = "HTTP "..tostring(msg.code)
-                    local stripped=msg.body:gsub('^%s*<[^>]*>',''):gsub('</[^>]+>%s*',' ')
-                    if #stripped>0 and stripped~=msg.body then
-                        errMsg=errMsg..": "..stripped:sub(1,100)
-                    end
-                    parseError(errMsg)
-                    return
-                end
                 local ok,body=pcall(JSON._decode,msg.body)
                 if ok and type(body)=='table' then
+                    body.code=body.code or msg.code
                     if tostring(body.code):sub(1,1)~='2' then
-                        local errMsg = body.message
+                        local errMsg = body.message or body.error
                         if not errMsg and msg and msg.body then
                             errMsg = tostring(msg.body)
                         elseif not errMsg then
@@ -154,6 +146,15 @@ local function getMsg(request,timeout)
                         parseError(errMsg)
                     end
                     return body
+                end
+                if msg.code and tostring(msg.code):sub(1,1)~='2' then
+                    local errMsg = "HTTP "..tostring(msg.code)
+                    local stripped=msg.body:gsub('^%s*<[^>]*>',''):gsub('</[^>]+>%s*',' ')
+                    if #stripped>0 and stripped~=msg.body then
+                        errMsg=errMsg..": "..stripped:sub(1,100)
+                    end
+                    parseError(errMsg)
+                    return {code=msg.code, message=errMsg}
                 else
                     MES.new('info',text.serverDown)
                     return
@@ -201,7 +202,7 @@ function NET.login(auto)
                     USERS.updateUsername(USER.uid,res.data.username)
                 end
                 saveUser()
-                NET.ws_connect()
+                NET.ws_connect(true)
                 NET.getUserInfo(USER.uid)
                 local CARD=require'parts.userCard'
                 CARD.reset()
@@ -250,7 +251,7 @@ function NET.loginWithPassword(username,password)
                 end
             end
             saveUser()
-            NET.ws_connect()
+            NET.ws_connect(true)
             NET.getUserInfo(USER.uid)
             local CARD=require'parts.userCard'
             CARD.reset()
@@ -320,6 +321,7 @@ function NET.launchNotice()
     TASK.new(function()
         local res=getMsg({
             pool='getNotice',
+            url=AUTHHOST,
             path='/api/notice?language='..noticeLang[SETTING.locale]..'&lastCount=1',
         },6.26)
 
@@ -338,6 +340,7 @@ function NET.getNotice(count)
     TASK.new(function()
         local res=getMsg({
             pool='getNotice',
+            url=AUTHHOST,
             path='/api/notice?language='..noticeLang[SETTING.locale]..'&lastCount='..(count or 5),
         },6.26)
 
@@ -1422,8 +1425,11 @@ function NET.startupConnect()
     end)
 end
 
-function NET.ws_connect()
-    if WS.status('game')=='dead' then
+function NET.ws_connect(force)
+    if force or WS.status('game')=='dead' then
+        if WS.status('game')~='dead' then
+            WS.close('game')
+        end
         local tok = USER.oToken or USER.aToken or ''
         WS.connect('game','',{['x-access-token']=tok},6)
         TASK.removeTask_code(NET.ws_update)
@@ -1453,6 +1459,7 @@ function NET.ws_update()
     if token then
         local res=getMsg({
             pool='getUID',
+            url=AUTHHOST,
             path='/api/auth/check',
             headers={["x-access-token"]=token},
         },6.26)

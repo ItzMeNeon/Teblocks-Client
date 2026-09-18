@@ -215,7 +215,7 @@ local function _loadRemoteEnv(P,confStr)-- Load gameEnv
         MES.new('warn',"Bad conf from "..USERS.getUsername(P.uid).."#"..P.uid)
     end
 
-    for i=1,#(confStr.skin or {}) do if confStr.skin[i]>16 then confStr.skin[i]=17 end end-- Filter invalid skin (bomb)
+    for i=1,#(confStr.skin or {}) do if confStr.skin[i]>24 then confStr.skin[i]=8 end end-- Filter invalid skin
 
     P.gameEnv={}-- Current game setting environment
     local ENV=P.gameEnv

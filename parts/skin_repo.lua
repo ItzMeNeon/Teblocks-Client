@@ -59,7 +59,7 @@ function SKIN_REPO.fetchRemote(cb)
 
         local timer = 0
         local received = false
-        while timer < 5.0 do
+        while timer < 6.0 do
             local msg = HTTP.pollMsg(pool)
             if msg then
                 if msg.code and tostring(msg.code):sub(1,1) == '2' and msg.body then
@@ -69,18 +69,39 @@ function SKIN_REPO.fetchRemote(cb)
                         local norm = { OFFICIAL_SKIN }
                         for _, it in ipairs(list) do
                             if it.id ~= 'neon_cyber' and (it.name or it.title) ~= 'Neon Cyber (Teblocks)' then
+                                local title = it.name or it.title or "Untitled Skin"
+                                local cleanName = title:gsub("[^%w_%- ]", ""):gsub("%s+", "_")
+                                if #cleanName == 0 then cleanName = tostring(it.id) end
+
+                                local dUrl = it.skin_url or it.url
+                                if not dUrl or dUrl == "" then
+                                    if AUTHHOST then
+                                        dUrl = "http://" .. AUTHHOST .. "/skins/" .. tostring(it.id) .. "/download"
+                                    end
+                                elseif dUrl:sub(1, 4) ~= "http" then
+                                    if AUTHHOST then
+                                        if dUrl:sub(1, 1) ~= "/" then dUrl = "/" .. dUrl end
+                                        dUrl = "http://" .. AUTHHOST .. dUrl
+                                    end
+                                end
+
                                 table.insert(norm, {
                                     id = it.id,
-                                    title = it.name or it.title or "Untitled Skin",
-                                    name = it.name or it.title or "Untitled Skin",
+                                    title = title,
+                                    name = title,
+                                    cleanName = cleanName,
                                     author = it.username or it.author or "Anonymous",
                                     username = it.username or it.author or "Anonymous",
                                     description = it.description or "",
                                     tags = it.tags or {},
                                     likes = it.likes or 0,
                                     downloads = it.downloads or 0,
-                                    installedName = it.name or it.title or "CustomSkin",
-                                    downloadUrl = it.url and (AUTHHOST and ('http://' .. AUTHHOST .. it.url)) or (AUTHHOST and ('http://' .. AUTHHOST .. '/skins/' .. it.id .. '/download')),
+                                    rating = it.rating or 5.0,
+                                    date = (it.created_at and tostring(it.created_at):sub(1, 10)) or "2026",
+                                    installedName = '[User] ' .. cleanName,
+                                    rawName = cleanName,
+                                    downloadUrl = dUrl,
+                                    skinUrl = it.skin_url or dUrl,
                                 })
                             end
                         end
@@ -102,7 +123,7 @@ function SKIN_REPO.fetchRemote(cb)
             timer = timer + coroutine.yield()
         end
 
-        if not received and timer >= 5.0 then
+        if not received and timer >= 6.0 then
             SKIN_REPO.onlineList = { OFFICIAL_SKIN }
             SKIN_REPO.connected = false
             SKIN_REPO.lastError = "Connection timed out"
@@ -122,16 +143,76 @@ function SKIN_REPO.isInstalled(item)
 
     local currentSkins = SKIN.getList()
     for _, name in ipairs(currentSkins) do
-        if name == item.installedName or name == item.title or name == ('[User] ' .. item.title) then
+        if name == item.installedName or
+           name == item.title or
+           name == ('[User] ' .. item.title) or
+           (item.cleanName and name == ('[User] ' .. item.cleanName)) or
+           (item.id and name == ('[User] ' .. item.id)) then
             return true
         end
     end
 
-    if item.filename and love.filesystem.getInfo('skins/' .. item.filename) then
+    if item.cleanName and (love.filesystem.getInfo('skins/' .. item.cleanName .. '.png') or love.filesystem.getInfo('skins/' .. item.cleanName .. '.PNG')) then
+        return true
+    end
+    if item.id and (love.filesystem.getInfo('skins/' .. item.id .. '.png') or love.filesystem.getInfo('skins/' .. item.id .. '.PNG')) then
         return true
     end
 
     return false
+end
+
+local previewLoading = {}
+
+-- Request asynchronous loading of an online skin preview image
+function SKIN_REPO.requestPreview(item)
+    if not item or not item.id or SKIN_REPO.previewImages[item.id] or previewLoading[item.id] then
+        return
+    end
+
+    -- Check if local file exists first
+    local localFile = item.filename or (item.cleanName and ('skins/' .. item.cleanName .. '.png')) or ('skins/' .. item.id .. '.png')
+    if love.filesystem.getInfo(localFile) then
+        local ok, loaded = pcall(love.graphics.newImage, localFile)
+        if ok and loaded then
+            loaded:setFilter('nearest', 'nearest')
+            SKIN_REPO.previewImages[item.id] = loaded
+            return
+        end
+    end
+
+    local dUrl = item.downloadUrl or item.skinUrl
+    if not dUrl or not HTTP then return end
+
+    previewLoading[item.id] = true
+    local pool = 'prev_' .. tostring(item.id):gsub("[^%w]", ""):sub(1, 16)
+    HTTP.request({
+        pool = pool,
+        url = dUrl,
+    })
+
+    TASK.new(function()
+        local timer = 0
+        while timer < 8.0 do
+            local msg = HTTP.pollMsg(pool)
+            if msg then
+                if msg.body and #msg.body > 0 and msg.code and tostring(msg.code):sub(1, 1) == '2' then
+                    local fData = love.filesystem.newFileData(msg.body, 'preview.png')
+                    local ok, loaded = pcall(love.graphics.newImage, fData)
+                    if ok and loaded then
+                        loaded:setFilter('nearest', 'nearest')
+                        SKIN_REPO.previewImages[item.id] = loaded
+                    end
+                end
+                HTTP.deletePool(pool)
+                previewLoading[item.id] = false
+                return
+            end
+            timer = timer + coroutine.yield()
+        end
+        HTTP.deletePool(pool)
+        previewLoading[item.id] = false
+    end)
 end
 
 -- Get preview image for rendering an online skin
@@ -145,6 +226,9 @@ function SKIN_REPO.getPreviewImage(item)
     local img = nil
     if item.filename and love.filesystem.getInfo(item.filename) then
         local ok, loaded = pcall(love.graphics.newImage, item.filename)
+        if ok and loaded then img = loaded end
+    elseif item.cleanName and love.filesystem.getInfo('skins/' .. item.cleanName .. '.png') then
+        local ok, loaded = pcall(love.graphics.newImage, 'skins/' .. item.cleanName .. '.png')
         if ok and loaded then img = loaded end
     elseif item.filename and love.filesystem.getInfo('skins/' .. item.filename) then
         local ok, loaded = pcall(love.graphics.newImage, 'skins/' .. item.filename)
@@ -163,9 +247,12 @@ function SKIN_REPO.getPreviewImage(item)
     if img then
         img:setFilter('nearest', 'nearest')
         SKIN_REPO.previewImages[item.id] = img
+        return img
     end
 
-    return img
+    -- Trigger async preview download if not yet started
+    SKIN_REPO.requestPreview(item)
+    return nil
 end
 
 -- Download and install a community skin from the server
@@ -173,7 +260,9 @@ function SKIN_REPO.download(item, onComplete)
     if not item then return end
     love.filesystem.createDirectory('skins')
 
-    local filename = item.filename or (item.id .. '.png')
+    local cleanName = item.cleanName or (item.title and item.title:gsub("[^%w_%- ]", ""):gsub("%s+", "_")) or tostring(item.id)
+    if #cleanName == 0 then cleanName = tostring(item.id) end
+    local filename = cleanName .. '.png'
     local targetPath = 'skins/' .. filename
 
     -- Base64 payload from server
@@ -185,32 +274,46 @@ function SKIN_REPO.download(item, onComplete)
             if fh then fh:write(raw) fh:close() end
 
             SKIN.reloadUser('skins')
-            if onComplete then onComplete(true, "Installed " .. item.title) end
+            if onComplete then onComplete(true, "Installed " .. (item.title or cleanName)) end
             return
         end
     end
 
     -- URL download from server
-    local downloadUrl = item.downloadUrl or (AUTHHOST and ('http://' .. AUTHHOST .. '/skins/' .. item.id .. '/download'))
+    local downloadUrl = item.downloadUrl or item.skinUrl or (AUTHHOST and ('http://' .. AUTHHOST .. '/skins/' .. item.id .. '/download'))
     if downloadUrl and HTTP then
         TASK.new(function()
-            local pool = 'skin_download_' .. tostring(item.id)
+            local pool = 'sk_dl_' .. tostring(item.id):gsub("[^%w]", ""):sub(1, 16)
             HTTP.request({
                 pool = pool,
                 url = downloadUrl,
             })
             local timer = 0
-            while timer < 12.0 do
+            while timer < 15.0 do
                 local msg = HTTP.pollMsg(pool)
                 if msg then
                     if msg.body and #msg.body > 0 and msg.code and tostring(msg.code):sub(1,1) == '2' then
+                        -- Safeguard: verify valid image before writing to disk
+                        local fData = love.filesystem.newFileData(msg.body, filename)
+                        local okImg, img = pcall(love.graphics.newImage, fData)
+                        if not okImg or not img then
+                            HTTP.deletePool(pool)
+                            if onComplete then onComplete(false, "Downloaded data is not a valid image") end
+                            return
+                        end
+
                         love.filesystem.write(targetPath, msg.body)
                         local fh = io.open(targetPath, 'wb')
                         if fh then fh:write(msg.body) fh:close() end
+
+                        img:setFilter('nearest', 'nearest')
+                        SKIN_REPO.previewImages[item.id] = img
+
                         SKIN.reloadUser('skins')
-                        if onComplete then onComplete(true, "Downloaded " .. item.title) end
+                        if onComplete then onComplete(true, "Downloaded " .. (item.title or cleanName)) end
                     else
-                        if onComplete then onComplete(false, "Download failed from server") end
+                        local errMsg = "Download failed (HTTP " .. tostring(msg.code or '?') .. ")"
+                        if onComplete then onComplete(false, errMsg) end
                     end
                     HTTP.deletePool(pool)
                     return
@@ -272,8 +375,10 @@ function SKIN_REPO.upload(rawName, meta, onComplete)
     TASK.new(function()
         local pool = 'skin_upload'
         local headers = {}
-        if USER and USER.aToken then
-            headers["x-access-token"] = USER.aToken
+        local tok = USER and (USER.aToken or USER.oToken)
+        if tok then
+            headers["x-access-token"] = tok
+            headers["Authorization"] = "Bearer " .. tok
         end
         HTTP.request({
             pool = pool,
@@ -281,6 +386,7 @@ function SKIN_REPO.upload(rawName, meta, onComplete)
             path = '/skins/upload',
             headers = headers,
             body = {
+                name        = meta.title or rawName,
                 title       = meta.title or rawName,
                 author      = meta.author or (USERS and USER and USERS.getUsername(USER.uid)) or 'Anonymous',
                 description = meta.description or '',
@@ -298,6 +404,12 @@ function SKIN_REPO.upload(rawName, meta, onComplete)
                     SKIN_REPO.fetchRemote()
                 else
                     local errMsg = "Upload failed (HTTP " .. tostring(msg.code or '?') .. ")"
+                    if msg.body and #msg.body > 0 then
+                        local ok, parsed = pcall(JSON.decode, msg.body)
+                        if ok and type(parsed) == 'table' and (parsed.error or parsed.message) then
+                            errMsg = parsed.error or parsed.message
+                        end
+                    end
                     if onComplete then onComplete(false, errMsg) end
                 end
                 HTTP.deletePool(pool)

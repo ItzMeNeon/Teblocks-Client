@@ -1,69 +1,192 @@
-local scene={}
+local scene = {}
 
-local CARD=require'parts.userCard'
-local AUTH=require'parts.authModal'
+local CARD = require 'parts.userCard'
+local AUTH = require 'parts.authModal'
+local LOBBY = require 'parts.lobbyPanel'
+local NET_BAR = require 'parts.netTopBar'
 
-local gc=love.graphics
-local gc_translate=gc.translate
-local gc_setColor,gc_setLineWidth=gc.setColor,gc.setLineWidth
-local gc_draw=gc.draw
-local gc_rectangle=gc.rectangle
-local gc_print,gc_printf=gc.print,gc.printf
+local gc = love.graphics
+local gc_setColor, gc_setLineWidth = gc.setColor, gc.setLineWidth
+local gc_draw, gc_rectangle, gc_circle = gc.draw, gc.rectangle, gc.circle
+local gc_print, gc_printf = gc.print, gc.printf
+local setFont = FONT.set
 
-local NET=NET
-local fetchTimer
+local NET = NET
+local fetchTimer = 0
 
-local roomList=WIDGET.newListBox{name='roomList',x=50,y=50,w=800,h=440,lineH=40,drawF=function(item,id,ifSel)
-    setFont(35)
-    if ifSel then
-        gc_setColor(1,1,1,.3)
-        gc_rectangle('fill',0,0,800,40)
+local function getMousePos()
+    if SCR and SCR.xOy then
+        return SCR.xOy:inverseTransformPoint(love.mouse.getPosition())
     end
+    return love.mouse.getPosition()
+end
 
-    gc_setColor(.9,.9,1)
-    gc_print(id,45,-4)
+local function fitText(str, maxW, fontSz)
+    if not str then return "" end
+    setFont(fontSz or 14)
+    local font = gc.getFont()
+    if not font or font:getWidth(str) <= maxW then return str end
+    local s = str
+    while #s > 1 and font:getWidth(s .. "…") > maxW do
+        s = s:sub(1, -2)
+    end
+    return s .. "…"
+end
 
-    if type(item)=='table' then
-        gc_setColor(1,1,1)
-        if item.private then
-            gc_draw(IMG.lock,10,5)
+local roomList = WIDGET.newListBox{
+    name  = 'roomList',
+    x     = 52,
+    y     = 124,
+    w     = 756,
+    h     = 405,
+    lineH = 58,
+    drawF = function(item, id, ifSel)
+        local rowW, rowH = 756, 52
+        local mx, my = getMousePos()
+        -- ListBox items are drawn in relative coordinates to the row (x=0..rowW, y=0..rowH)
+        
+        -- Row Card Background
+        if ifSel then
+            gc_setColor(.18, .28, .62, .95)
+            gc_rectangle('fill', 0, 0, rowW, rowH, 6)
+            gc_setColor(.45, .75, 1.0, 1)
+            gc_setLineWidth(1.5)
+            gc_rectangle('line', 0, 0, rowW, rowH, 6)
+            -- Highlight pill on left
+            gc_setColor(.4, .8, 1.0, 1)
+            gc_rectangle('fill', 0, 2, 4, rowH - 4, 2)
+        else
+            gc_setColor(.07, .10, .24, .75)
+            gc_rectangle('fill', 0, 0, rowW, rowH, 6)
+            gc_setColor(.18, .24, .45, .5)
+            gc_setLineWidth(1)
+            gc_rectangle('line', 0, 0, rowW, rowH, 6)
         end
-        if item.count then
-            gc_printf(
-                type(item.count.Spectator)=='number' and item.count.Spectator>0 and
-                    ("$1(+$2)/$3"):repD(item.count.Gamer or '?',item.count.Spectator or '?',item.capacity or '?')
-                    or
-                ("$1/$2"):repD(item.count.Gamer or '?',item.capacity or '?'),600,-4,180,'right')
-        end
 
-        if item.info and item.state then
-            if item.state=='Standby' then
-                gc_setColor(COLOR.Z)
-            elseif item.state=='Ready' then
-                gc_setColor(COLOR.lB)
-            elseif item.state=='Playing' then
-                gc_setColor(COLOR.G)
+        -- Room Number / ID badge
+        gc_setColor(.14, .20, .42, .8)
+        gc_rectangle('fill', 14, 10, 52, 32, 4)
+        gc_setColor(.45, .65, 1.0, .7)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 14, 10, 52, 32, 4)
+        setFont(13)
+        gc_setColor(.85, .92, 1.0, .95)
+        gc_printf("#" .. tostring(id), 14, 18, 52, 'center')
+
+        if type(item) == 'table' then
+            -- Lock icon if password-protected
+            local nameStartX = 78
+            if item.private then
+                gc_setColor(1.0, .80, .25, 1)
+                setFont(15)
+                gc_print("🔒", 74, 16)
+                nameStartX = 98
             end
-            gc_print(item.name,200,-4)
+
+            -- Room Name
+            setFont(16)
+            gc_setColor(ifSel and 1 or .92, ifSel and 1 or .95, 1, 1)
+            local rName = item.name or ("Room " .. tostring(id))
+            gc_print(fitText(rName, 360, 16), nameStartX, 16)
+
+            -- State Badge
+            local stateX = 490
+            local stateStr = item.state or "Standby"
+            if stateStr == 'Standby' then
+                gc_setColor(.12, .32, .55, .85)
+                gc_rectangle('fill', stateX, 12, 90, 28, 4)
+                gc_setColor(.35, .80, 1.0, 1)
+                gc_setLineWidth(1)
+                gc_rectangle('line', stateX, 12, 90, 28, 4)
+                gc_setColor(1, 1, 1, 1)
+                setFont(11)
+                gc_printf("● STANDBY", stateX, 19, 90, 'center')
+            elseif stateStr == 'Ready' then
+                gc_setColor(.15, .25, .65, .85)
+                gc_rectangle('fill', stateX, 12, 90, 28, 4)
+                gc_setColor(.45, .65, 1.0, 1)
+                gc_setLineWidth(1)
+                gc_rectangle('line', stateX, 12, 90, 28, 4)
+                gc_setColor(1, 1, 1, 1)
+                setFont(11)
+                gc_printf("● READY", stateX, 19, 90, 'center')
+            elseif stateStr == 'Playing' then
+                gc_setColor(.12, .45, .25, .85)
+                gc_rectangle('fill', stateX, 12, 90, 28, 4)
+                gc_setColor(.35, 1.0, .55, 1)
+                gc_setLineWidth(1)
+                gc_rectangle('line', stateX, 12, 90, 28, 4)
+                gc_setColor(1, 1, 1, 1)
+                setFont(11)
+                gc_printf("● PLAYING", stateX, 19, 90, 'center')
+            end
+
+            -- Players Count Badge
+            if item.count then
+                local gamers = item.count.Gamer or '?'
+                local cap = item.capacity or '?'
+                local specs = item.count.Spectator
+                local countText = ("👥 %s/%s"):format(gamers, cap)
+                if type(specs) == 'number' and specs > 0 then
+                    countText = countText .. (" (+%s)"):format(specs)
+                end
+
+                gc_setColor(.12, .16, .35, .8)
+                gc_rectangle('fill', 600, 12, 140, 28, 4)
+                gc_setColor(.35, .50, .85, .6)
+                gc_setLineWidth(1)
+                gc_rectangle('line', 600, 12, 140, 28, 4)
+
+                setFont(12)
+                gc_setColor(.85, .92, 1.0, .95)
+                gc_printf(countText, 600, 19, 140, 'center')
+            end
         end
     end
-end}
+}
+
 local function _hidePW()
-    local R=roomList:getSel()
+    local R = roomList:getSel()
     return not R or not R.private
 end
-local passwordBox=WIDGET.newInputBox{name='password',x=350,y=505,w=500,h=50,secret=true,hideF=_hidePW,limit=64}
+
+local passwordBox = WIDGET.newInputBox{
+    name   = 'password',
+    x      = 52,
+    y      = 542,
+    w      = 756,
+    h      = 46,
+    secret = true,
+    hideF  = _hidePW,
+    limit  = 64
+}
 
 local function _fetchRoom()
-    fetchTimer=10
+    fetchTimer = 10
     NET.room_fetch()
 end
-local scene={}
+
+local function _enterSelectedRoom()
+    local R = roomList:getSel()
+    if R and not TASK.getLock('fetchRoom') and not TASK.getLock('enterRoom') then
+        if R.info and R.info.version == VERSION.room then
+            local pw = (not _hidePW() and passwordBox:getText()) or nil
+            NET.room_enter(R.roomId, pw)
+        else
+            MES.new('error', text.versionNotMatch or "Room engine version mismatch")
+        end
+    end
+end
+
+local popupY = 720
+local popupTargetY = 720
 
 function scene.enter()
     CARD.reset()
     CARD.enter()
     BG.set()
+    LOBBY.reset()
+    NET_BAR.initBG()
     _fetchRoom()
     DiscordRPC.update("Checking room list")
 end
@@ -73,105 +196,398 @@ function scene.leave()
     AUTH.close()
 end
 
-function scene.keyDown(key,rep)
-    if AUTH.isOpen() then return AUTH.keyDown(key,rep) end
+function scene.keyDown(key, rep)
+    if AUTH.isOpen() then return AUTH.keyDown(key, rep) end
+    if LOBBY.keyDown(key) then return true end
     if TASK.getLock('enterRoom') then return true end
-    if key=='r' then
-        if fetchTimer<=7 then
+
+    if (key == 'escape' or key == 'back') and not rep then
+        if LOBBY.isAnyOpen() then
+            if LOBBY.chat and LOBBY.chat.visible then LOBBY.chat:toggle() end
+            if LOBBY.playerList and LOBBY.playerList.visible then LOBBY.playerList:toggle() end
+        else
+            SCN.backTo('lobby')
+        end
+        return false
+    elseif key == 'r' and not rep then
+        if fetchTimer <= 8 then
+            SFX.play('rotate')
             _fetchRoom()
         end
-    elseif roomList:getLen()>0 and (key=='join' or (key=='return' or key=='kpenter') and love.keyboard.isDown('lctrl','rctrl')) then
-        local R=roomList:getSel()
-        if R and not TASK.getLock('fetchRoom') then
-            if R.info.version==VERSION.room then
-                NET.room_enter(R.roomId,not _hidePW() and passwordBox.value or nil)
-            else
-                MES.new('error',text.versionNotMatch)
-            end
+        return false
+    elseif key == 'return' or key == 'kpenter' then
+        if not WIDGET.isFocus(passwordBox) then
+            _enterSelectedRoom()
+            return false
         end
-    else
-        return true
     end
+    return true
 end
 
 function scene.textInput(t)
     if AUTH.isOpen() and AUTH.textInput(t) then return true end
+    if LOBBY.textInput(t) then return true end
 end
 
-function scene.mouseDown(x,y)
+function scene.mouseDown(x, y)
     if AUTH.isOpen() then
-        AUTH.mouseClick(x,y)
+        if AUTH.mouseClick(x, y) then return true end
         return true
+    end
+    if CARD.mouseClick(x, y) then return true end
+    if LOBBY.mouseClick(x, y) then return true end
+
+    -- Top bar back button
+    if NET_BAR.checkBackClick(x, y) then
+        SFX.play('back')
+        SCN.backTo('lobby')
+        return true
+    end
+
+    -- Join Button inside right detail card (x=860..1220, y=536..588)
+    local R = roomList:getSel()
+    if R and x >= 860 and x <= 1220 and y >= 536 and y <= 588 then
+        SFX.play('reach')
+        _enterSelectedRoom()
+        return true
+    end
+
+    -- Bottom Bar: Refresh button (x=40..190, y=622..670)
+    if x >= 40 and x <= 190 and y >= 622 and y <= 670 then
+        if fetchTimer <= 8 then
+            SFX.play('rotate')
+            _fetchRoom()
+        end
+        return true
+    end
+
+    -- Bottom Bar: Create New Room (x=205..415, y=622..670)
+    if x >= 205 and x <= 415 and y >= 622 and y <= 670 then
+        SFX.play('click')
+        SCN.go('net_newRoom', 'swipeL')
+        return true
+    end
+
+    -- Bottom Bar: Join Room (x=430..630, y=622..670)
+    if x >= 430 and x <= 630 and y >= 622 and y <= 670 then
+        _enterSelectedRoom()
+        return true
+    end
+
+    -- Bottom Bar: Room Settings (x=645..795, y=622..670)
+    if x >= 645 and x <= 795 and y >= 622 and y <= 670 then
+        SFX.play('click')
+        SCN.go('setting_game')
+        return true
+    end
+
+    -- Bottom Bar: Back button (x=1090..1240, y=622..670)
+    if x >= 1090 and x <= 1240 and y >= 622 and y <= 670 then
+        SFX.play('back')
+        SCN.backTo('lobby')
+        return true
+    end
+
+    -- Matchmaking cancel popup button
+    if NET.matchmaking and popupY < 700 then
+        local pw, ph = 380, 72
+        local px = 640 - pw / 2
+        local py = popupY
+        local cancelX = px + pw - 28
+        local cancelY = py + 22
+        if (x - cancelX) ^ 2 + (y - cancelY) ^ 2 <= 16 * 16 then
+            NET.matchmaking = false
+            NET.searchTimer = 0
+            NET.ranked_leave()
+            popupTargetY = 720
+            SFX.play('click')
+            return true
+        end
     end
 end
 scene.touchDown = scene.mouseDown
-
-function scene.mouseClick(x,y)
-    if AUTH.mouseClick(x,y) then return true end
-    if CARD.mouseClick(x,y) then return true end
-end
-scene.touchClick = scene.mouseClick
+scene.mouseClick = scene.mouseDown
+scene.touchClick = scene.mouseDown
 
 function scene.update(dt)
     CARD.update(dt)
     AUTH.update(dt)
+    LOBBY.update(dt)
+    NET_BAR.update(dt)
+
     if not TASK.getLock('fetchRoom') then
-        fetchTimer=fetchTimer-dt
-        if fetchTimer<=0 and _hidePW() then
+        fetchTimer = fetchTimer - dt
+        if fetchTimer <= 0 and _hidePW() then
             _fetchRoom()
         end
     end
+
+    if NET.matchFoundPending then
+        popupTargetY = -100
+    elseif NET.matchmaking then
+        popupTargetY = 620
+    else
+        popupTargetY = 720
+    end
+    popupY = MATH.expApproach(popupY, popupTargetY, dt * 12)
 end
 
 function scene.draw()
-    -- Fetching timer
-    if fetchTimer>0 then
-        gc_setColor(1,1,1,.12)
-        GC.arc('fill','pie',250,630,40,-math.pi/2,-math.pi/2-.6283*fetchTimer)
+    local t = love.timer.getTime()
+    local mx, my = getMousePos()
+
+    -- 1. Ambient Background Particles
+    NET_BAR.drawBG()
+
+    -- 2. Left Panel: Available Rooms Directory (x=40, y=74, w=780, h=530)
+    local p1X, p1Y, p1W, p1H = 40, 74, 780, 530
+    gc_setColor(.05, .08, .18, .92)
+    gc_rectangle('fill', p1X, p1Y, p1W, p1H, 8)
+    gc_setColor(.20, .32, .60, .6)
+    gc_setLineWidth(1.5)
+    gc_rectangle('line', p1X, p1Y, p1W, p1H, 8)
+
+    -- Left Header
+    setFont(20)
+    gc_setColor(1, 1, 1, .98)
+    gc_print("ACTIVE LOBBIES", p1X + 20, p1Y + 16)
+
+    local roomCount = roomList:getLen()
+    setFont(13)
+    gc_setColor(.45, .75, 1.0, .9)
+    gc_print(("• %d Available"):format(roomCount), p1X + 175, p1Y + 22)
+
+    -- Auto-refresh timer ring / label
+    local refX = p1X + p1W - 170
+    gc_setColor(.10, .15, .32, .8)
+    gc_rectangle('fill', refX, p1Y + 14, 150, 28, 4)
+    gc_setColor(.25, .40, .75, .6)
+    gc_setLineWidth(1)
+    gc_rectangle('line', refX, p1Y + 14, 150, 28, 4)
+
+    -- Mini animated pie
+    if fetchTimer > 0 then
+        gc_setColor(.35, .75, 1.0, .85)
+        GC.arc('fill', 'pie', refX + 16, p1Y + 28, 7, -math.pi / 2, -math.pi / 2 + (fetchTimer / 10) * math.pi * 2)
+    end
+    setFont(11)
+    gc_setColor(.80, .90, 1.0, .9)
+    gc_print(("Auto-refresh: %ds"):format(math.max(0, math.ceil(fetchTimer))), refX + 28, p1Y + 21)
+
+    -- Password Hint when password box is visible
+    if not _hidePW() then
+        setFont(12)
+        gc_setColor(.95, .75, .25, .9)
+        gc_print("🔒 This room requires a password. Type it below before joining:", p1X + 20, p1Y + 448)
+    elseif roomCount == 0 and not TASK.getLock('fetchRoom') then
+        setFont(14)
+        gc_setColor(.55, .68, .90, .75)
+        gc_printf("No active rooms right now. Click \"Create New Room\" below to host one!", p1X + 20, p1Y + 220, p1W - 40, 'center')
     end
 
-    -- Room list
-    local R=roomList:getSel()
+    -- 3. Right Panel: Room Detail & Inspection (x=840, y=74, w=400, h=530)
+    local p2X, p2Y, p2W, p2H = 840, 74, 400, 530
+    gc_setColor(.05, .08, .18, .92)
+    gc_rectangle('fill', p2X, p2Y, p2W, p2H, 8)
+    gc_setColor(.20, .32, .60, .6)
+    gc_setLineWidth(1.5)
+    gc_rectangle('line', p2X, p2Y, p2W, p2H, 8)
+
+    local R = roomList:getSel()
     if R then
-        gc_translate(870,220)
-        gc_setColor(1,1,1)
-        gc_setLineWidth(3)
-        gc_rectangle('line',0,0,385,335)
-        setFont(25)
-        gc_print(R.type,10,25)
-        gc_setColor(1,1,.7)
-        gc_printf(R.name,10,0,365)
+        -- Header
         setFont(20)
-        gc_setColor(COLOR.lH)
-        gc_printf(R.description or "[No description]",10,55,365)
-        if R.start then
-            gc_setColor(COLOR.lA)
-            gc_print(text.started,10,300)
+        gc_setColor(1, 1, 1, 1)
+        gc_print(fitText(R.name or "Unnamed Room", p2W - 40, 20), p2X + 20, p2Y + 16)
+
+        setFont(13)
+        gc_setColor(.45, .75, 1.0, .9)
+        gc_print("Room Type: " .. tostring(R.type or "Custom VS"), p2X + 20, p2Y + 44)
+
+        -- Description
+        local descY = p2Y + 74
+        gc_setColor(.08, .12, .26, .7)
+        gc_rectangle('fill', p2X + 16, descY, p2W - 32, 70, 6)
+        gc_setColor(.22, .32, .58, .5)
+        gc_setLineWidth(1)
+        gc_rectangle('line', p2X + 16, descY, p2W - 32, 70, 6)
+
+        setFont(12)
+        gc_setColor(.80, .88, 1.0, .85)
+        gc_printf(R.description or "No special description provided for this room.", p2X + 24, descY + 10, p2W - 48)
+
+        -- Specifications Grid
+        local specY = p2Y + 160
+        gc_setColor(.35, .55, .90, .35)
+        gc.line(p2X + 16, specY, p2X + p2W - 16, specY)
+
+        setFont(13)
+        gc_setColor(1, 1, 1, .95)
+        gc_print("Match Specifications", p2X + 20, specY + 10)
+
+        local specs = {
+            { label = "Current Status", val = R.start and "● In Match" or "● In Lobby" },
+            { label = "Players Count", val = (R.count and R.count.Gamer or "?") .. " / " .. (R.capacity or "?") },
+            { label = "Spectators",   val = (R.count and R.count.Spectator or "0") .. " Spectating" },
+            { label = "Privacy",       val = R.private and "Password Protected" or "Public Open" },
+            { label = "Room ID",       val = tostring(R.roomId or "N/A") },
+            { label = "Engine Ver.",   val = tostring(R.version or "Unknown") },
+        }
+
+        for i, sp in ipairs(specs) do
+            local sy = specY + 38 + (i - 1) * 36
+            gc_setColor(.10, .14, .30, .6)
+            gc_rectangle('fill', p2X + 16, sy, p2W - 32, 30, 4)
+
+            setFont(12)
+            gc_setColor(.60, .72, .92, .8)
+            gc_print(sp.label, p2X + 24, sy + 7)
+
+            gc_setColor(1, 1, 1, .98)
+            gc_printf(sp.val, p2X + 16, sy + 7, p2W - 40, 'right')
         end
-        gc_setColor(COLOR.lN)
-        gc_printf(R.version,10,300,365,'right')
-        gc_translate(-870,-220)
+
+        -- Big Join Button inside Right Inspection Card
+        local isJoinHov = (mx >= p2X + 20 and mx <= p2X + p2W - 20 and my >= p2Y + p2H - 68 and my <= p2Y + p2H - 16)
+        if isJoinHov then
+            gc_setColor(.18, .70, .38, .95)
+            gc_rectangle('fill', p2X + 20, p2Y + p2H - 68, p2W - 40, 52, 8)
+            gc_setColor(.45, 1.0, .65, 1)
+            gc_setLineWidth(1.5)
+            gc_rectangle('line', p2X + 20, p2Y + p2H - 68, p2W - 40, 52, 8)
+        else
+            gc_setColor(.14, .55, .30, .9)
+            gc_rectangle('fill', p2X + 20, p2Y + p2H - 68, p2W - 40, 52, 8)
+            gc_setColor(.35, .85, .50, .8)
+            gc_setLineWidth(1)
+            gc_rectangle('line', p2X + 20, p2Y + p2H - 68, p2W - 40, 52, 8)
+        end
+        setFont(17)
+        gc_setColor(1, 1, 1, 1)
+        gc_printf("🚀 JOIN ROOM  [Enter]", p2X + 20, p2Y + p2H - 52, p2W - 40, 'center')
+    else
+        -- Empty Selection State
+        setFont(20)
+        gc_setColor(.60, .72, .95, .8)
+        gc_printf("📁 No Room Selected", p2X + 20, p2Y + 120, p2W - 40, 'center')
+
+        setFont(13)
+        gc_setColor(.50, .60, .82, .75)
+        gc_printf("Select a casual lobby from the directory on the left to inspect rules, view players, or enter the game.", p2X + 30, p2Y + 160, p2W - 60, 'center')
+        gc_printf("Want to host your own ruleset? Click \"Create New Room\" below to start a private or public match.", p2X + 30, p2Y + 230, p2W - 60, 'center')
     end
 
-    -- Profile
-    CARD.draw()
+    -- 4. Bottom Action Bar (y=622..670)
+    -- Button 1: Refresh [R]
+    local isRefHov = (mx >= 40 and mx <= 190 and my >= 622 and my <= 670)
+    gc_setColor(isRefHov and .18 or .08, isRefHov and .26 or .12, isRefHov and .50 or .24, .85)
+    gc_rectangle('fill', 40, 622, 150, 48, 6)
+    gc_setColor(.30, .45, .75, .6)
+    gc_setLineWidth(1)
+    gc_rectangle('line', 40, 622, 150, 48, 6)
+    gc_setColor(1, 1, 1, .9)
+    setFont(14)
+    gc_printf("🔄 Refresh [R]", 40, 636, 150, 'center')
 
-    -- Player count
-    drawOnlinePlayerCount()
+    -- Button 2: Create New Room
+    local isNewHov = (mx >= 205 and mx <= 415 and my >= 622 and my <= 670)
+    gc_setColor(isNewHov and .22 or .14, isNewHov and .45 or .32, isNewHov and .85 or .65, .9)
+    gc_rectangle('fill', 205, 622, 210, 48, 6)
+    gc_setColor(.45, .75, 1.0, 1)
+    gc_setLineWidth(1.5)
+    gc_rectangle('line', 205, 622, 210, 48, 6)
+    gc_setColor(1, 1, 1, 1)
+    setFont(14)
+    gc_printf("➕ Create New Room", 205, 636, 210, 'center')
 
-    AUTH.draw()
+    -- Button 3: Join Room
+    local isJoinBottomHov = (mx >= 430 and mx <= 630 and my >= 622 and my <= 670)
+    if R then
+        gc_setColor(isJoinBottomHov and .18 or .12, isJoinBottomHov and .65 or .50, isJoinBottomHov and .35 or .25, .9)
+        gc_rectangle('fill', 430, 622, 200, 48, 6)
+        gc_setColor(.35, 1.0, .55, 1)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 430, 622, 200, 48, 6)
+        gc_setColor(1, 1, 1, 1)
+    else
+        gc_setColor(.08, .12, .20, .5)
+        gc_rectangle('fill', 430, 622, 200, 48, 6)
+        gc_setColor(.18, .25, .40, .4)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 430, 622, 200, 48, 6)
+        gc_setColor(.45, .55, .70, .6)
+    end
+    setFont(14)
+    gc_printf("🚀 Join Room", 430, 636, 200, 'center')
+
+    -- Button 4: Game Settings
+    local isSetHov = (mx >= 645 and mx <= 795 and my >= 622 and my <= 670)
+    gc_setColor(isSetHov and .18 or .08, isSetHov and .26 or .12, isSetHov and .50 or .24, .85)
+    gc_rectangle('fill', 645, 622, 150, 48, 6)
+    gc_setColor(.30, .45, .75, .6)
+    gc_setLineWidth(1)
+    gc_rectangle('line', 645, 622, 150, 48, 6)
+    gc_setColor(1, 1, 1, .9)
+    setFont(14)
+    gc_printf("⚙ Settings", 645, 636, 150, 'center')
+
+    -- Button 5: Back to Lobby [Esc]
+    local isBackHov = (mx >= 1090 and mx <= 1240 and my >= 622 and my <= 670)
+    gc_setColor(isBackHov and .22 or .12, isBackHov and .18 or .10, isBackHov and .30 or .18, .85)
+    gc_rectangle('fill', 1090, 622, 150, 48, 6)
+    gc_setColor(.55, .35, .60, .6)
+    gc_setLineWidth(1)
+    gc_rectangle('line', 1090, 622, 150, 48, 6)
+    gc_setColor(1, 1, 1, .9)
+    setFont(14)
+    gc_printf("← Lobby [Esc]", 1090, 636, 150, 'center')
+
+    -- 5. Top Bar
+    NET_BAR.draw("CASUAL ROOM BROWSER", "← Lobby")
 end
 
-scene.widgetList={
+function scene.overDraw()
+    LOBBY.draw()
+    LOBBY.drawToggleButtons()
+    CARD.draw()
+    AUTH.draw()
+
+    if popupY < 700 then
+        local alpha = math.min(1, math.max(0, (720 - popupY) / 80))
+        local pw, ph = 380, 72
+        local px = 640 - pw / 2
+        local py = popupY
+
+        gc_setColor(.06, .09, .20, .95 * alpha)
+        gc_rectangle('fill', px, py, pw, ph, 8)
+        gc_setColor(.95, .75, .25, .85 * alpha)
+        gc_setLineWidth(1.5)
+        gc_rectangle('line', px, py, pw, ph, 8)
+
+        setFont(16)
+        gc_setColor(1.0, .85, .30, alpha)
+        gc.printf("Ranked Match Searching...", px, py + 12, pw, 'center')
+
+        if NET.searchTimer then
+            gc_setColor(.75, .85, 1.0, .9 * alpha)
+            setFont(13)
+            gc.printf(("Elapsed Time: %.1fs"):format(NET.searchTimer), px, py + 38, pw, 'center')
+        end
+
+        local cancelX = px + pw - 28
+        local cancelY = py + 22
+        gc_setLineWidth(2)
+        gc_setColor(1, .3, .4, .8 * alpha)
+        gc_circle('line', cancelX, cancelY, 14)
+        gc_setLineWidth(2.5)
+        gc.line(cancelX - 5, cancelY - 5, cancelX + 5, cancelY + 5)
+        gc.line(cancelX + 5, cancelY - 5, cancelX - 5, cancelY + 5)
+    end
+end
+
+scene.widgetList = {
     roomList,
     passwordBox,
-    WIDGET.newKey{name='setting',    x=970,y=640,w=90,h=90,font=60,fText=CHAR.icon.settings,code=goScene'setting_game'},
-    WIDGET.newText{name='refreshing',x=450,y=240,font=45,hideF=function() return not TASK.getLock('fetchRoom') end},
-    WIDGET.newText{name='noRoom',    x=450,y=245,font=40,hideF=function() return roomList:getLen()>0 or TASK.getLock('fetchRoom') end},
-    WIDGET.newKey{name='refresh',    x=250,y=630,w=140,h=120,code=_fetchRoom,hideF=function() return fetchTimer>7 end},
-    WIDGET.newKey{name='new',        x=510,y=630,w=260,h=120,code=goScene('net_newRoom','swipeL')},
-    WIDGET.newKey{name='join',       x=780,y=630,w=140,h=120,code=pressKey'join',hideF=function() return roomList:getLen()==0 or TASK.getLock('enterRoom') end},
-    WIDGET.newButton{name='back',    x=1140,y=640,w=170,h=80,sound='back',font=60,fText=CHAR.icon.back,code=pressKey'escape'},
 }
 
 return scene

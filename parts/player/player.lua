@@ -1634,7 +1634,7 @@ function Player:_getBlock(id,name,color,bagLineCounter)-- Get a block object
         bk=BLOCKS[id][dir],
         RS=self.RS,
         name=name or id,
-        color=ENV.bone and 17 or color or ENV.skin[id],
+        color=ENV.bone and 8 or color or ENV.skin[id],
         bagLine=bagLineCounter,
     }
 end

@@ -8,9 +8,12 @@ BLOCK_NAMES={
 }
 BLOCK_CHARS={} for i=1,#BLOCK_NAMES do BLOCK_CHARS[i]=CHAR.mino[BLOCK_NAMES[i]] end
 BLOCK_COLORS={
-    COLOR.R,COLOR.F,COLOR.O,COLOR.Y,COLOR.L,COLOR.J,COLOR.G,COLOR.A,
-    COLOR.C,COLOR.N,COLOR.S,COLOR.B,COLOR.V,COLOR.P,COLOR.M,COLOR.W,
-    COLOR.dH,COLOR.D,COLOR.lY,COLOR.H,COLOR.lH,COLOR.dV,COLOR.dR,COLOR.dG,
+    -- Row 1: 7 Tetrominoes (1:1 piece order: Z, S, J, L, T, O, I) + Garbage
+    COLOR.R,COLOR.G,COLOR.S,COLOR.O,COLOR.P,COLOR.Y,COLOR.C,COLOR.dH,
+    -- Row 2: Secondary / Spectrum Colors
+    COLOR.F,COLOR.L,COLOR.J,COLOR.A,COLOR.N,COLOR.B,COLOR.V,COLOR.M,
+    -- Row 3: Special & Shaded Blocks (Bomb, Pentamino, Specials)
+    COLOR.W,COLOR.D,COLOR.lY,COLOR.H,COLOR.lH,COLOR.dV,COLOR.dR,COLOR.dG,
 }
 RANK_CHARS={'B','A','S','U','X'} for i=1,#RANK_CHARS do RANK_CHARS[i]=CHAR.icon['rank'..RANK_CHARS[i]] end
 RANK_COLORS={
@@ -628,9 +631,9 @@ do-- Userdata tables
         locale='zh',
         skinSet='Neon Cyber (Teblocks)',
         skin={
-            1,7,11,3,14,4,9,
-            1,7,2,6,10,2,13,5,9,15,4,11,3,12,2,16,8,4,
-            10,13,2,8
+            1,2,3,4,5,6,7, -- 7 Standard Tetrominoes: Z, S, J, L, T, O, I (1:1 with slots 1..7)
+            1,2,9,11,13,9,15,10,7,16,6,3,4,14,9,17,12,6, -- Pentaminoes
+            13,15,9,12 -- Ominoes 1, 2, 3-1, 3-2
         },
         face={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
 

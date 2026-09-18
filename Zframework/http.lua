@@ -28,15 +28,31 @@ local threadCode=[[
         end
 
         -- print("\n------SEND------") for k,v in next,arg do print(k,v) end
-        local data={}
-        local _,code,detail=http.request{
-            method=arg.method,
-            url=arg.url,
-            headers=arg.headers,
-            source=ltn12.source.string(arg.body),
-
-            sink=ltn12.sink.table(data),
-        }
+        local currentUrl = arg.url
+        local maxRedirects = 3
+        local _, code, detail
+        local data
+        while maxRedirects > 0 do
+            data = {}
+            _, code, detail = http.request{
+                method = arg.method,
+                url = currentUrl,
+                headers = arg.headers,
+                source = ltn12.source.string(arg.body),
+                sink = ltn12.sink.table(data),
+            }
+            local codeNum = tonumber(code)
+            if (codeNum == 301 or codeNum == 302 or codeNum == 303 or codeNum == 307 or codeNum == 308) and detail and detail.location then
+                currentUrl = detail.location
+                if currentUrl:sub(1,7) ~= 'http://' and currentUrl:sub(1,8) ~= 'https://' then
+                    local prefix = arg.url:match("^(https?://[^/]+)")
+                    if prefix then currentUrl = prefix .. currentUrl end
+                end
+                maxRedirects = maxRedirects - 1
+            else
+                break
+            end
+        end
 
         local result={
             pool=arg.pool,
@@ -80,7 +96,7 @@ function HTTP.request(arg)
     arg.method=arg.method or arg.body and 'POST' or 'GET'
     if arg.url then
         assert(type(arg.url)=='string',"Field 'url' need string, get "..type(arg.url))
-        if arg.url:sub(1,7)~='http://' then arg.url='http://'..arg.url end
+        if arg.url:sub(1,7)~='http://' and arg.url:sub(1,8)~='https://' then arg.url='http://'..arg.url end
     else
         arg.url=HTTP._host or error("Need url=<string> or set default host with HTTP.setHost")
     end
@@ -157,7 +173,7 @@ function HTTP.pollMsg(pool)
 end
 function HTTP.setHost(host)
     assert(type(host)=='string',"Host must be string")
-    if host:sub(1,7)~='http://' then host='http://'..host end
+    if host:sub(1,7)~='http://' and host:sub(1,8)~='https://' then host='http://'..host end
     HTTP._host=host
 end
 

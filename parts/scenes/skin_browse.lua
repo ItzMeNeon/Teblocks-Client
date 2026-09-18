@@ -34,13 +34,25 @@ local maxScroll = 0
 
 -- Filter chips for Online Library
 local filterChips = {
-    { id = 'all',       label = "All"       },
-    { id = 'popular',   label = "Popular"   },
-    { id = 'latest',    label = "Latest"    },
-    { id = 'top_rated', label = "Top Rated" },
-    { id = 'official',  label = "Official"  },
+    { id = 'all',       label = "All",       w = 48 },
+    { id = 'popular',   label = "Popular",   w = 70 },
+    { id = 'latest',    label = "Latest",    w = 62 },
+    { id = 'top_rated', label = "Top Rated", w = 78 },
+    { id = 'official',  label = "Official",  w = 68 },
 }
 local currentFilter = 'all'
+
+-- Helper to truncate and fit text within a given pixel width
+local function fitText(str, maxW)
+    if not str then return "" end
+    local font = GC.getFont()
+    if not font or font:getWidth(str) <= maxW then return str end
+    local s = str
+    while #s > 1 and font:getWidth(s .. "…") > maxW do
+        s = s:sub(1, -2)
+    end
+    return s .. "…"
+end
 
 -- Download animation states (map of id -> download status)
 local downloadState = {}
@@ -64,9 +76,9 @@ local searchBox = WIDGET.newInputBox{
     name  = 'searchBox',
     x     = 40,
     y     = 82,
-    w     = 410,
-    h     = 42,
-    font  = 18,
+    w     = 260,
+    h     = 38,
+    font  = 16,
     limit = 48,
 }
 
@@ -125,7 +137,7 @@ end
 
 local function refreshLists()
     SKIN_REPO.filter = currentFilter
-    SKIN_REPO.searchQuery = searchBox.value
+    SKIN_REPO.searchQuery = searchBox:getText()
     onlineList = SKIN_REPO.getFilteredList()
     installedList = SKIN.getList()
 
@@ -141,7 +153,7 @@ local function refreshLists()
         maxScroll = math.max(0, #onlineList * 96 - 480)
         onlineSelect = math.min(onlineSelect, math.max(1, #onlineList))
     elseif currentTab == 'installed' then
-        maxScroll = math.max(0, #installedList * 96 - 440)
+        maxScroll = math.max(0, #installedList * 88 - 380)
         installedSelect = math.min(installedSelect, math.max(1, #installedList))
     else
         maxScroll = 0
@@ -149,6 +161,15 @@ local function refreshLists()
 end
 
 local function setTab(tab)
+    if tab == 'publish' then
+        if not (USER and USER.uid and USER.uid ~= false) then
+            MES.new('warn', "Please log in to publish skins to the community repository")
+            local AUTH = require 'parts.authModal'
+            AUTH.open('login')
+            return
+        end
+    end
+
     currentTab = tab
     scrollOffset = 0
     updateWidgetVisibility()
@@ -157,13 +178,13 @@ local function setTab(tab)
     if tab == 'publish' then
         -- Prefill fields
         local currentCustom = customSkinsList[publishCustomIndex] or "MySkin"
-        if pubTitleBox.value == "" then pubTitleBox.value = currentCustom end
-        if pubAuthorBox.value == "" then
+        if pubTitleBox:getText() == "" then pubTitleBox:setText(currentCustom) end
+        if pubAuthorBox:getText() == "" then
             local pName = (USERS and USER and USERS.getUsername(USER.uid)) or "Player"
-            pubAuthorBox.value = pName
+            pubAuthorBox:setText(pName)
         end
-        if pubTagsBox.value == "" then pubTagsBox.value = "clean, minimal, teblocks" end
-        if pubDescBox.value == "" then pubDescBox.value = "Custom mino skin created for Teblocks." end
+        if pubTagsBox:getText() == "" then pubTagsBox:setText("clean, minimal, teblocks") end
+        if pubDescBox:getText() == "" then pubDescBox:setText("Custom mino skin created for Teblocks.") end
     end
 end
 
@@ -171,13 +192,6 @@ end
 --  SCENE LIFECYCLE
 -- ════════════════════════════════════════════════════════════
 function scene.enter()
-    if not (USER and USER.uid and USER.uid ~= false) then
-        MES.new('warn', "Please log in to browse community skins")
-        SCN.back()
-        AUTH.open('login')
-        return
-    end
-
     BG.set()
     SKIN_REPO.init()
     setTab('online')
@@ -198,8 +212,9 @@ local lastRepoVersion = -1
 
 function scene.update(dt)
     if currentTab == 'online' then
-        if searchBox.value ~= lastSearchValue or (SKIN_REPO.version and SKIN_REPO.version ~= lastRepoVersion) then
-            lastSearchValue = searchBox.value
+        local curSearch = searchBox:getText()
+        if curSearch ~= lastSearchValue or (SKIN_REPO.version and SKIN_REPO.version ~= lastRepoVersion) then
+            lastSearchValue = curSearch
             lastRepoVersion = SKIN_REPO.version
             refreshLists()
         end
@@ -282,11 +297,14 @@ end
 -- ════════════════════════════════════════════════════════════
 local function drawMinoTile(item, skinName, blockIdx, x, y, scale)
     scale = scale or 1
-    -- 1. If loaded in SKIN.lib
-    if skinName and SKIN.lib[skinName] and SKIN.lib[skinName][blockIdx] then
-        GC.setColor(1, 1, 1, 1)
-        GC.draw(SKIN.lib[skinName][blockIdx], x, y, 0, scale)
-        return
+    -- 1. If installed/loaded in SKIN
+    if skinName and (SKIN.isLoaded(skinName) or SKIN.exists(skinName)) then
+        local lib = SKIN.lib[skinName]
+        if lib and lib[blockIdx] then
+            GC.setColor(1, 1, 1, 1)
+            GC.draw(lib[blockIdx], x, y, 0, scale)
+            return
+        end
     end
 
     -- 2. If available from SKIN_REPO preview image
@@ -299,18 +317,28 @@ local function drawMinoTile(item, skinName, blockIdx, x, y, scale)
         end
     end
 
-    -- 3. Fallback placeholder block
-    GC.setColor(.3, .4, .6, .7)
-    GC.rectangle('fill', x, y, 30 * scale, 30 * scale, 3 * scale)
-    GC.setColor(1, 1, 1, .4)
-    GC.rectangle('line', x, y, 30 * scale, 30 * scale, 3 * scale)
+    -- 3. Colorful fallback placeholder block
+    local paletteColors = {
+        {0.95, 0.25, 0.35}, -- 1 Z
+        {0.30, 0.85, 0.40}, -- 2 S
+        {0.25, 0.45, 0.95}, -- 3 J
+        {0.95, 0.60, 0.20}, -- 4 L
+        {0.70, 0.30, 0.95}, -- 5 T
+        {0.95, 0.85, 0.25}, -- 6 O
+        {0.25, 0.85, 0.95}, -- 7 I
+    }
+    local col = paletteColors[((blockIdx - 1) % 7) + 1] or {0.4, 0.5, 0.7}
+    GC.setColor(col[1], col[2], col[3], 0.75)
+    GC.rectangle('fill', x, y, 30 * scale, 30 * scale, math.max(1, math.floor(3 * scale)))
+    GC.setColor(1, 1, 1, 0.5)
+    GC.rectangle('line', x, y, 30 * scale, 30 * scale, math.max(1, math.floor(3 * scale)))
 end
 
 local function drawTetrominoRow(item, skinName, startX, startY, scale, animTime)
     scale = scale or 1
     local pieceLabels = { 'Z', 'S', 'J', 'L', 'T', 'O', 'I' }
-    -- Standard Teblocks piece colors mapping
-    local pieceColors = { 1, 7, 11, 3, 14, 4, 9 }
+    -- Standard Teblocks piece colors mapping (1:1 with top row slots 1..7)
+    local pieceColors = { 1, 2, 3, 4, 5, 6, 7 }
 
     for n = 1, 7 do
         local bx = startX + ((n - 1) % 4) * 110 * scale
@@ -390,11 +418,11 @@ function scene.mouseDown(x, y)
 
     -- ── 2. Online Library Tab Interactions ───────────────────
     if currentTab == 'online' then
-        -- Filter chips (y=82..124)
-        if y >= 82 and y <= 124 and x >= 460 and x <= 800 then
-            local chipX = 465
+        -- Filter chips (y=82..122)
+        if y >= 82 and y <= 122 and x >= 315 and x <= 670 then
+            local chipX = 315
             for _, chip in ipairs(filterChips) do
-                local chipW = 55 + (chip.label:len() > 6 and 20 or 0)
+                local chipW = chip.w or 60
                 if x >= chipX and x <= chipX + chipW then
                     if currentFilter ~= chip.id then
                         currentFilter = chip.id
@@ -403,7 +431,7 @@ function scene.mouseDown(x, y)
                     end
                     return
                 end
-                chipX = chipX + chipW + 8
+                chipX = chipX + chipW + 6
             end
         end
 
@@ -476,21 +504,22 @@ function scene.mouseDown(x, y)
                     local isEq = (SETTING.skinSet == item.installedName) or (item.isOfficial and SETTING.skinSet == 'Neon Cyber (Teblocks)')
 
                     if isInst and not isEq then
-                        -- Equip installed skin
+                        -- Already downloaded & installed -> Equip it!
                         SETTING.skinSet = item.installedName or ('[User] ' .. item.title)
                         saveSettings()
                         SFX.play('reach')
                         MES.new('check', "Equipped: " .. item.title)
                         return
                     elseif not isInst then
-                        -- Download skin
+                        -- Must download skin first! Do NOT equip yet.
                         downloadState[item.id] = true
                         SFX.play('click')
+                        MES.new('info', "Downloading " .. item.title .. "...")
                         SKIN_REPO.download(item, function(success, msg)
                             downloadState[item.id] = false
                             if success then
                                 SFX.play('reach')
-                                MES.new('check', msg or "Skin downloaded!")
+                                MES.new('check', "Downloaded " .. item.title .. "! Click Equip to use it.")
                                 refreshLists()
                             else
                                 MES.new('error', msg or "Download failed")
@@ -514,20 +543,21 @@ function scene.mouseDown(x, y)
                 local isEq = (SETTING.skinSet == curItem.installedName) or (curItem.isOfficial and SETTING.skinSet == 'Neon Cyber (Teblocks)')
 
                 if isInst and not isEq then
+                    -- Already downloaded -> Equip it!
                     SETTING.skinSet = curItem.installedName or ('[User] ' .. curItem.title)
                     saveSettings()
                     SFX.play('reach')
                     MES.new('check', "Equipped: " .. curItem.title)
                 elseif not isInst then
+                    -- Download first!
                     downloadState[curItem.id] = true
                     SFX.play('click')
+                    MES.new('info', "Downloading " .. curItem.title .. "...")
                     SKIN_REPO.download(curItem, function(success, msg)
                         downloadState[curItem.id] = false
                         if success then
-                            SETTING.skinSet = curItem.installedName or ('[User] ' .. curItem.title)
-                            saveSettings()
                             SFX.play('reach')
-                            MES.new('check', "Downloaded & Equipped: " .. curItem.title)
+                            MES.new('check', "Downloaded " .. curItem.title .. "! Click Equip to use it.")
                             refreshLists()
                         else
                             MES.new('error', msg or "Download failed")
@@ -586,7 +616,7 @@ function scene.mouseDown(x, y)
                             break
                         end
                     end
-                    pubTitleBox.value = rawName
+                    pubTitleBox:setText(rawName)
                     setTab('publish')
                     SFX.play('click')
                     return
@@ -607,28 +637,41 @@ function scene.mouseDown(x, y)
             return
         end
 
-        -- Right Panel: Delete button for custom skin (x=780..990, y=620..675)
+        -- Right Panel Action Buttons (x=770..1240, y=620..675)
         local selName = installedList[installedSelect]
         local isUser = selName and selName:sub(1, 7) == '[User] '
-        if isUser and x >= 780 and x <= 990 and y >= 620 and y <= 675 then
-            local rawName = selName:sub(8)
-            love.filesystem.remove('skins/' .. rawName .. '.png')
-            pcall(os.remove, 'skins/' .. rawName .. '.png')
-            SKIN.reloadUser('skins')
-            refreshLists()
-            if SETTING.skinSet == selName then
-                SETTING.skinSet = installedList[1] or 'Neon Cyber (Teblocks)'
-                saveSettings()
+        local isEq  = (selName == SETTING.skinSet)
+        if y >= 620 and y <= 675 then
+            -- Primary Button (x=780..1000): Equip skin if not active
+            if x >= 780 and x <= 1000 then
+                if not isEq and selName then
+                    SETTING.skinSet = selName
+                    saveSettings()
+                    SFX.play('reach')
+                    MES.new('check', "Equipped: " .. selName)
+                end
+                return
             end
-            SFX.play('click')
-            MES.new('info', "Deleted skin: " .. rawName)
-            return
-        end
 
-        -- Right Panel: Color Settings (x=1010..1230, y=620..675)
-        if x >= 1010 and x <= 1230 and y >= 620 and y <= 675 then
-            SCN.go('setting_skin')
-            return
+            -- Secondary Button (x=1010..1230): Delete if custom, or Color Settings if built-in
+            if x >= 1010 and x <= 1230 then
+                if isUser then
+                    local rawName = selName:sub(8)
+                    love.filesystem.remove('skins/' .. rawName .. '.png')
+                    pcall(os.remove, 'skins/' .. rawName .. '.png')
+                    SKIN.reloadUser('skins')
+                    refreshLists()
+                    if SETTING.skinSet == selName then
+                        SETTING.skinSet = installedList[1] or 'Neon Cyber (Teblocks)'
+                        saveSettings()
+                    end
+                    SFX.play('click')
+                    MES.new('info', "Deleted skin: " .. rawName)
+                else
+                    SCN.go('setting_skin')
+                end
+                return
+            end
         end
     end
 
@@ -639,14 +682,14 @@ function scene.mouseDown(x, y)
             -- Left arrow (x=70..110)
             if x >= 70 and x <= 110 and publishCustomIndex > 1 then
                 publishCustomIndex = publishCustomIndex - 1
-                pubTitleBox.value = customSkinsList[publishCustomIndex] or ""
+                pubTitleBox:setText(customSkinsList[publishCustomIndex] or "")
                 SFX.play('click')
                 return
             end
             -- Right arrow (x=510..550)
             if x >= 510 and x <= 550 and publishCustomIndex < #customSkinsList then
                 publishCustomIndex = publishCustomIndex + 1
-                pubTitleBox.value = customSkinsList[publishCustomIndex] or ""
+                pubTitleBox:setText(customSkinsList[publishCustomIndex] or "")
                 SFX.play('click')
                 return
             end
@@ -660,14 +703,14 @@ function scene.mouseDown(x, y)
                 return
             end
 
-            local title = pubTitleBox.value:gsub("^%s*(.-)%s*$", "%1")
+            local title = pubTitleBox:getText():gsub("^%s*(.-)%s*$", "%1")
             if #title == 0 then title = curSkinName end
 
             local meta = {
                 title       = title,
-                author      = pubAuthorBox.value,
-                tags        = pubTagsBox.value,
-                description = pubDescBox.value,
+                author      = pubAuthorBox:getText(),
+                tags        = pubTagsBox:getText(),
+                description = pubDescBox:getText(),
             }
 
             SFX.play('click')
@@ -817,37 +860,37 @@ function scene.draw()
     -- ════════════════════════════════════════════════════════════
     if currentTab == 'online' then
         -- Search input hint if empty
-        if searchBox.value == "" and not WIDGET.isFocus(searchBox) then
+        if searchBox:getText() == "" and not WIDGET.isFocus(searchBox) then
             GC.setColor(.45, .55, .75, .6)
             setFont(14)
             GC.print("🔍 Type to search skins, authors, tags...", 55, 93)
         end
 
-        -- Filter Chips (x=465..800)
-        local chipX = 465
+        -- Filter Chips (x=315..665)
+        local chipX = 315
         for _, chip in ipairs(filterChips) do
-            local chipW = 55 + (chip.label:len() > 6 and 20 or 0)
+            local chipW = chip.w or 60
             local isSel = (currentFilter == chip.id)
-            local isHov = (mx >= chipX and mx <= chipX + chipW and my >= 82 and my <= 124)
+            local isHov = (mx >= chipX and mx <= chipX + chipW and my >= 82 and my <= 120)
 
             if isSel then
                 GC.setColor(.25, .55, .95, .9)
-                GC.rectangle('fill', chipX, 82, chipW, 40, 5)
+                GC.rectangle('fill', chipX, 82, chipW, 38, 5)
                 GC.setColor(1, 1, 1, 1)
             elseif isHov then
                 GC.setColor(.15, .25, .45, .8)
-                GC.rectangle('fill', chipX, 82, chipW, 40, 5)
+                GC.rectangle('fill', chipX, 82, chipW, 38, 5)
                 GC.setColor(.85, .92, 1, 1)
             else
                 GC.setColor(.08, .12, .24, .6)
-                GC.rectangle('fill', chipX, 82, chipW, 40, 5)
+                GC.rectangle('fill', chipX, 82, chipW, 38, 5)
                 GC.setColor(.65, .75, .90, .75)
             end
             GC.setLineWidth(1)
-            GC.rectangle('line', chipX, 82, chipW, 40, 5)
+            GC.rectangle('line', chipX, 82, chipW, 38, 5)
             setFont(12)
-            GC.mStr(chip.label, chipX + chipW * 0.5, 95)
-            chipX = chipX + chipW + 8
+            GC.mStr(chip.label, chipX + chipW * 0.5, 94)
+            chipX = chipX + chipW + 6
         end
 
         -- ── Cards Scrollable List (x=40..740, y=135..680) ────
@@ -1003,18 +1046,19 @@ function scene.draw()
                 -- Title & Creator
                 GC.setColor(isSel and 1 or .92, isSel and 1 or .95, 1, 1)
                 setFont(17)
-                GC.print(item.title, listX + 148, cardY + 14)
+                GC.print(fitText(item.title, 420), listX + 148, cardY + 14)
 
                 GC.setColor(.55, .75, 1, .9)
                 setFont(12)
-                GC.print("by " .. item.author, listX + 148, cardY + 38)
+                GC.print(fitText("by " .. item.author, 420), listX + 148, cardY + 38)
 
                 -- Stats row
                 GC.setColor(.65, .75, .90, .7)
                 setFont(11)
+                local dl = tonumber(item.downloads) or 0
                 local statsStr = ("⬇ %s  •  ★ %.1f  •  %s"):format(
-                    item.downloads > 1000 and ("%.1fk"):format(item.downloads/1000) or tostring(item.downloads),
-                    item.rating or 5.0,
+                    dl > 1000 and ("%.1fk"):format(dl/1000) or tostring(dl),
+                    tonumber(item.rating) or 5.0,
                     item.date or "2026"
                 )
                 GC.print(statsStr, listX + 148, cardY + 58)
@@ -1057,6 +1101,20 @@ function scene.draw()
         end
         GC.setStencilTest()
 
+        -- Online List Scrollbar
+        if maxScroll > 0 then
+            local sbX = listX + listW + 6
+            local sbY = listY
+            local sbW = 5
+            local sbH = listH
+            GC.setColor(.10, .14, .30, .5)
+            GC.rectangle('fill', sbX, sbY, sbW, sbH, 2)
+            local thumbH = math.max(30, sbH * (sbH / (sbH + maxScroll)))
+            local thumbY = sbY + (scrollOffset / maxScroll) * (sbH - thumbH)
+            GC.setColor(.35, .65, 1, .85)
+            GC.rectangle('fill', sbX, thumbY, sbW, thumbH, 2)
+        end
+
         -- ── Right Column: osu!-style Detail & Live Inspection ──
         local prevX, prevY, prevW, prevH = 770, 82, 470, 598
         GC.setColor(.05, .07, .17, .90)
@@ -1073,88 +1131,123 @@ function scene.draw()
             -- Header Banner
             GC.setColor(1, 1, 1, .98)
             setFont(22)
-            GC.print(curItem.title, prevX + 22, prevY + 18)
+            GC.print(fitText(curItem.title, prevW - 44), prevX + 22, prevY + 16)
 
             GC.setColor(.45, .78, 1, .95)
             setFont(13)
-            GC.print("Creator: " .. curItem.author, prevX + 22, prevY + 48)
+            GC.print(fitText("Creator: " .. curItem.author, prevW - 44), prevX + 22, prevY + 44)
 
+            -- Description: scissor clamped to 32px height to avoid overlapping preview
             GC.setColor(.65, .75, .92, .80)
             setFont(11)
-            GC.printf(curItem.description or "", prevX + 22, prevY + 70, prevW - 44)
+            GC.stencil(function()
+                GC.rectangle('fill', prevX + 22, prevY + 64, prevW - 44, 34)
+            end, 'replace', 2)
+            GC.setStencilTest('equal', 2)
+            GC.printf(curItem.description or "No description provided.", prevX + 22, prevY + 64, prevW - 44)
+            GC.setStencilTest()
 
             -- Live 7 Tetromino Showcase
             GC.setColor(.35, .55, .90, .4)
-            GC.line(prevX + 20, prevY + 122, prevX + prevW - 20, prevY + 122)
+            GC.line(prevX + 20, prevY + 104, prevX + prevW - 20, prevY + 104)
 
             GC.setColor(.75, .88, 1, .9)
-            setFont(13)
-            GC.print("Live Mino Preview (7 Tetrominoes):", prevX + 22, prevY + 132)
+            setFont(12)
+            GC.print("Live Mino Preview (7 Tetrominoes):", prevX + 22, prevY + 112)
 
-            drawTetrominoRow(curItem, curItem.installedName, prevX + 24, prevY + 160, 0.95, t)
+            drawTetrominoRow(curItem, curItem.installedName, prevX + 24, prevY + 134, 0.88, t)
 
             -- 24 Palette Block Tiles Grid
-            local palY = prevY + 365
+            local palY = prevY + 310
             GC.setColor(.35, .55, .90, .4)
             GC.line(prevX + 20, palY - 8, prevX + prevW - 20, palY - 8)
 
             GC.setColor(.75, .88, 1, .9)
-            setFont(13)
+            setFont(12)
             GC.print("Complete 24-Tile Palette Sheet (240×90 RGBA):", prevX + 22, palY)
 
             for row = 0, 2 do
                 for col = 1, 8 do
                     local bIdx = row * 8 + col
                     local px = prevX + 22 + (col - 1) * 52
-                    local py = palY + 22 + row * 44
-                    drawMinoTile(curItem, curItem.installedName, bIdx, px, py, 1.2)
+                    local py = palY + 20 + row * 40
+                    drawMinoTile(curItem, curItem.installedName, bIdx, px, py, 1.1)
                     GC.setColor(.25, .35, .60, .5)
                     GC.setLineWidth(1)
-                    GC.rectangle('line', px, py, 36, 36, 2)
+                    GC.rectangle('line', px, py, 34, 34, 2)
                 end
             end
 
+            -- Metadata row
+            local metaY = prevY + 452
+            GC.setColor(.35, .55, .90, .4)
+            GC.line(prevX + 20, metaY - 6, prevX + prevW - 20, metaY - 6)
+
+            GC.setColor(.65, .75, .92, .85)
+            setFont(12)
+            local dl = tonumber(curItem.downloads) or 0
+            local statText = ("Downloads: %s   •   Rating: ★ %.1f   •   Updated: %s"):format(
+                dl > 1000 and ("%.1fk"):format(dl/1000) or tostring(dl),
+                tonumber(curItem.rating) or 5.0,
+                curItem.date or "2026"
+            )
+            GC.print(statText, prevX + 22, metaY)
+
+            local tagStr = ""
+            if type(curItem.tags) == 'table' then
+                tagStr = table.concat(curItem.tags, ", ")
+            elseif type(curItem.tags) == 'string' then
+                tagStr = curItem.tags
+            end
+            if #tagStr > 0 then
+                GC.setColor(.45, .65, .85, .75)
+                setFont(11)
+                GC.print(fitText("Tags: " .. tagStr, prevW - 44), prevX + 22, metaY + 20)
+            end
+
             -- Bottom Action Buttons
-            local isHovBtn1 = (mx >= prevX + 15 and mx <= prevX + 240 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
+            local isHovBtn1 = (mx >= prevX + 15 and mx <= prevX + 235 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
             if isEq then
                 GC.setColor(.12, .40, .22, .9)
-                GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+                GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 220, 46, 6)
                 GC.setColor(.35, 1, .55, 1)
                 GC.setLineWidth(1.5)
-                GC.rectangle('line', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+                GC.rectangle('line', prevX + 15, prevY + prevH - 58, 220, 46, 6)
                 GC.setColor(1, 1, 1, 1)
-                setFont(15)
-                GC.mStr("✓ Currently Equipped", prevX + 127, prevY + prevH - 44)
+                setFont(14)
+                GC.mStr("● Currently Equipped", prevX + 125, prevY + prevH - 44)
             elseif isInst then
                 GC.setColor(isHovBtn1 and .25 or .18, isHovBtn1 and .55 or .40, isHovBtn1 and 1 or .85, .95)
-                GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+                GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 220, 46, 6)
                 GC.setColor(.65, .85, 1, 1)
                 GC.setLineWidth(1.5)
-                GC.rectangle('line', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+                GC.rectangle('line', prevX + 15, prevY + prevH - 58, 220, 46, 6)
                 GC.setColor(1, 1, 1, 1)
-                setFont(15)
-                GC.mStr("✓ Equip This Skin", prevX + 127, prevY + prevH - 44)
+                setFont(14)
+                GC.mStr("✓ Equip This Skin", prevX + 125, prevY + prevH - 44)
             else
+                local isDownloading = downloadState[curItem.id]
                 GC.setColor(isHovBtn1 and .25 or .18, isHovBtn1 and .65 or .50, isHovBtn1 and 1 or .85, .95)
-                GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+                GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 220, 46, 6)
                 GC.setColor(.75, .90, 1, 1)
                 GC.setLineWidth(1.5)
-                GC.rectangle('line', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+                GC.rectangle('line', prevX + 15, prevY + prevH - 58, 220, 46, 6)
                 GC.setColor(1, 1, 1, 1)
-                setFont(15)
-                GC.mStr("⚡ Download & Equip", prevX + 127, prevY + prevH - 44)
+                setFont(14)
+                local btnLabel = isDownloading and "Downloading..." or "⬇ Download Skin"
+                GC.mStr(btnLabel, prevX + 125, prevY + prevH - 44)
             end
 
             -- Color settings button
-            local isHovCol = (mx >= prevX + 250 and mx <= prevX + prevW - 15 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
+            local isHovCol = (mx >= prevX + 245 and mx <= prevX + prevW - 15 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
             GC.setColor(isHovCol and .22 or .12, isHovCol and .28 or .16, isHovCol and .55 or .35, .85)
-            GC.rectangle('fill', prevX + 250, prevY + prevH - 58, 205, 46, 6)
+            GC.rectangle('fill', prevX + 245, prevY + prevH - 58, 210, 46, 6)
             GC.setColor(.45, .60, .95, .8)
             GC.setLineWidth(1)
-            GC.rectangle('line', prevX + 250, prevY + prevH - 58, 205, 46, 6)
+            GC.rectangle('line', prevX + 245, prevY + prevH - 58, 210, 46, 6)
             GC.setColor(.90, .94, 1, 1)
             setFont(14)
-            GC.mStr("🎨 Color Settings", prevX + 352, prevY + prevH - 44)
+            GC.mStr("🎨 Color Settings", prevX + 350, prevY + prevH - 44)
         else
             -- Live preview of the currently equipped skin
             local eqSkin = SETTING.skinSet or 'Neon Cyber (Teblocks)'
@@ -1164,67 +1257,67 @@ function scene.draw()
             -- Header Banner
             GC.setColor(1, 1, 1, .98)
             setFont(22)
-            GC.print(dispName, prevX + 22, prevY + 18)
+            GC.print(fitText(dispName, prevW - 44), prevX + 22, prevY + 16)
 
             GC.setColor(.45, .78, 1, .95)
             setFont(13)
-            GC.print("Currently Equipped Skin (" .. (isUser and "Custom User Skin" or "Built-in Preset") .. ")", prevX + 22, prevY + 48)
+            GC.print("Currently Equipped Skin (" .. (isUser and "Custom User Skin" or "Built-in Preset") .. ")", prevX + 22, prevY + 44)
 
             GC.setColor(.65, .75, .92, .80)
             setFont(11)
-            GC.printf("This skin is currently equipped and active in your offline and multiplayer matches.", prevX + 22, prevY + 70, prevW - 44)
+            GC.printf("This skin is currently equipped and active in your offline and multiplayer matches.", prevX + 22, prevY + 64, prevW - 44)
 
             -- Live 7 Tetromino Showcase
             GC.setColor(.35, .55, .90, .4)
-            GC.line(prevX + 20, prevY + 122, prevX + prevW - 20, prevY + 122)
+            GC.line(prevX + 20, prevY + 104, prevX + prevW - 20, prevY + 104)
 
             GC.setColor(.75, .88, 1, .9)
-            setFont(13)
-            GC.print("Live Mino Preview (7 Tetrominoes):", prevX + 22, prevY + 132)
+            setFont(12)
+            GC.print("Live Mino Preview (7 Tetrominoes):", prevX + 22, prevY + 112)
 
-            drawTetrominoRow(nil, eqSkin, prevX + 24, prevY + 160, 0.95, t)
+            drawTetrominoRow(nil, eqSkin, prevX + 24, prevY + 134, 0.88, t)
 
             -- 24 Palette Block Tiles Grid
-            local palY = prevY + 365
+            local palY = prevY + 310
             GC.setColor(.35, .55, .90, .4)
             GC.line(prevX + 20, palY - 8, prevX + prevW - 20, palY - 8)
 
             GC.setColor(.75, .88, 1, .9)
-            setFont(13)
+            setFont(12)
             GC.print("Complete 24-Tile Palette Sheet (240×90 RGBA):", prevX + 22, palY)
 
             for row = 0, 2 do
                 for col = 1, 8 do
                     local bIdx = row * 8 + col
                     local px = prevX + 22 + (col - 1) * 52
-                    local py = palY + 22 + row * 44
-                    drawMinoTile(nil, eqSkin, bIdx, px, py, 1.2)
+                    local py = palY + 20 + row * 40
+                    drawMinoTile(nil, eqSkin, bIdx, px, py, 1.1)
                     GC.setColor(.25, .35, .60, .5)
                     GC.setLineWidth(1)
-                    GC.rectangle('line', px, py, 36, 36, 2)
+                    GC.rectangle('line', px, py, 34, 34, 2)
                 end
             end
 
             -- Bottom Action Buttons
-            local isHovBtn1 = (mx >= prevX + 15 and mx <= prevX + 240 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
+            local isHovBtn1 = (mx >= prevX + 15 and mx <= prevX + 235 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
             GC.setColor(isHovBtn1 and .22 or .14, isHovBtn1 and .45 or .28, isHovBtn1 and .85 or .58, .9)
-            GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+            GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 220, 46, 6)
             GC.setColor(.45, .75, 1, 1)
             GC.setLineWidth(1.5)
-            GC.rectangle('line', prevX + 15, prevY + prevH - 58, 225, 46, 6)
+            GC.rectangle('line', prevX + 15, prevY + prevH - 58, 220, 46, 6)
             GC.setColor(1, 1, 1, 1)
-            setFont(15)
-            GC.mStr("📦 Installed Skins", prevX + 127, prevY + prevH - 44)
+            setFont(14)
+            GC.mStr("📦 Installed Skins", prevX + 125, prevY + prevH - 44)
 
-            local isHovCol = (mx >= prevX + 250 and mx <= prevX + prevW - 15 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
+            local isHovCol = (mx >= prevX + 245 and mx <= prevX + prevW - 15 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
             GC.setColor(isHovCol and .22 or .12, isHovCol and .28 or .16, isHovCol and .55 or .35, .85)
-            GC.rectangle('fill', prevX + 250, prevY + prevH - 58, 205, 46, 6)
+            GC.rectangle('fill', prevX + 245, prevY + prevH - 58, 210, 46, 6)
             GC.setColor(.45, .60, .95, .8)
             GC.setLineWidth(1)
-            GC.rectangle('line', prevX + 250, prevY + prevH - 58, 205, 46, 6)
+            GC.rectangle('line', prevX + 245, prevY + prevH - 58, 210, 46, 6)
             GC.setColor(.90, .94, 1, 1)
             setFont(14)
-            GC.mStr("🎨 Color Settings", prevX + 352, prevY + prevH - 44)
+            GC.mStr("🎨 Color Settings", prevX + 350, prevY + prevH - 44)
         end
     end
 
@@ -1268,7 +1361,7 @@ function scene.draw()
                 -- Title & Tag
                 GC.setColor(1, 1, 1, .98)
                 setFont(17)
-                GC.print(displayName, listX + 148, cardY + 16)
+                GC.print(fitText(displayName, 350), listX + 148, cardY + 16)
 
                 if isUser then
                     GC.setColor(.95, .65, .25, .90)
@@ -1315,6 +1408,20 @@ function scene.draw()
         end
         GC.setStencilTest()
 
+        -- Installed List Scrollbar
+        if maxScroll > 0 then
+            local sbX = listX + listW + 6
+            local sbY = listY
+            local sbW = 5
+            local sbH = listH
+            GC.setColor(.10, .14, .30, .5)
+            GC.rectangle('fill', sbX, sbY, sbW, sbH, 2)
+            local thumbH = math.max(30, sbH * (sbH / (sbH + maxScroll)))
+            local thumbY = sbY + (scrollOffset / maxScroll) * (sbH - thumbH)
+            GC.setColor(.35, .65, 1, .85)
+            GC.rectangle('fill', sbX, thumbY, sbW, thumbH, 2)
+        end
+
         -- Bottom Dropzone for Drag & Drop
         local dropX, dropY, dropW, dropH = 40, 555, 710, 125
         GC.setColor(.07, .10, .24, .85)
@@ -1333,7 +1440,7 @@ function scene.draw()
         GC.mStr("Click to open skins folder or drop your custom PNG directly into the window.", dropX + dropW * 0.5, dropY + 78)
 
         -- Right Column Live Preview
-        local prevX, prevY, prevW, prevH = 770, 90, 470, 590
+        local prevX, prevY, prevW, prevH = 770, 82, 470, 598
         GC.setColor(.05, .07, .17, .90)
         GC.rectangle('fill', prevX, prevY, prevW, prevH, 8)
         GC.setColor(.22, .32, .60, .6)
@@ -1343,56 +1450,112 @@ function scene.draw()
         local selName = installedList[installedSelect] or 'Neon Cyber (Teblocks)'
         local isUser = selName:sub(1, 7) == '[User] '
         local cleanName = isUser and selName:sub(8) or selName
+        local isEq = (selName == SETTING.skinSet)
 
         GC.setColor(1, 1, 1, .98)
         setFont(22)
-        GC.print(cleanName, prevX + 22, prevY + 18)
+        GC.print(fitText(cleanName, prevW - 44), prevX + 22, prevY + 16)
 
         GC.setColor(.45, .78, 1, .95)
         setFont(13)
-        GC.print(isUser and "User Custom Skin" or "Official Teblocks Built-In Skin", prevX + 22, prevY + 48)
+        GC.print(isUser and ("User Custom Skin (skins/" .. cleanName .. ".png)") or "Official Teblocks Built-In Skin", prevX + 22, prevY + 44)
 
-        drawTetrominoRow(nil, selName, prevX + 24, prevY + 110, 0.95, t)
+        -- Live Mino Preview
+        GC.setColor(.35, .55, .90, .4)
+        GC.line(prevX + 20, prevY + 76, prevX + prevW - 20, prevY + 76)
+
+        GC.setColor(.75, .88, 1, .9)
+        setFont(12)
+        GC.print("Live Mino Preview (7 Tetrominoes):", prevX + 22, prevY + 84)
+
+        drawTetrominoRow(nil, selName, prevX + 24, prevY + 106, 0.88, t)
 
         -- 24 Palette
-        local palY = prevY + 345
+        local palY = prevY + 282
+        GC.setColor(.35, .55, .90, .4)
+        GC.line(prevX + 20, palY - 8, prevX + prevW - 20, palY - 8)
+
         GC.setColor(.75, .88, 1, .9)
-        setFont(13)
-        GC.print("Palette Sheet Blocks (240×90):", prevX + 22, palY)
+        setFont(12)
+        GC.print("Complete 24-Tile Palette Sheet (240×90 RGBA):", prevX + 22, palY)
 
         for row = 0, 2 do
             for col = 1, 8 do
                 local bIdx = row * 8 + col
                 local px = prevX + 22 + (col - 1) * 52
-                local py = palY + 24 + row * 44
-                drawMinoTile(nil, selName, bIdx, px, py, 1.2)
+                local py = palY + 20 + row * 40
+                drawMinoTile(nil, selName, bIdx, px, py, 1.1)
                 GC.setColor(.25, .35, .60, .5)
                 GC.setLineWidth(1)
-                GC.rectangle('line', px, py, 36, 36, 2)
+                GC.rectangle('line', px, py, 34, 34, 2)
             end
         end
 
-        -- Delete button if custom user skin
-        if isUser then
-            GC.setColor(.65, .15, .20, .85)
-            GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 215, 46, 6)
-            GC.setColor(.95, .45, .50, .9)
-            GC.setLineWidth(1)
-            GC.rectangle('line', prevX + 15, prevY + prevH - 58, 215, 46, 6)
-            GC.setColor(1, 1, 1, 1)
-            setFont(15)
-            GC.mStr("🗑 Delete Skin", prevX + 122, prevY + prevH - 44)
+        -- Status message
+        local statusY = prevY + 440
+        GC.setColor(.35, .55, .90, .4)
+        GC.line(prevX + 20, statusY - 6, prevX + prevW - 20, statusY - 6)
+
+        if isEq then
+            GC.setColor(.35, 1, .55, .95)
+            setFont(13)
+            GC.print("● Currently Active in All Modes", prevX + 22, statusY)
+            GC.setColor(.65, .75, .92, .8)
+            setFont(11)
+            GC.print("This skin is currently selected and active in offline and multiplayer games.", prevX + 22, statusY + 20)
+        else
+            GC.setColor(.75, .88, 1, .9)
+            setFont(13)
+            GC.print("○ Ready to Equip", prevX + 22, statusY)
+            GC.setColor(.65, .75, .92, .8)
+            setFont(11)
+            GC.print("Click 'Equip This Skin' below to make this your active skin.", prevX + 22, statusY + 20)
         end
 
-        -- Color Settings button
-        GC.setColor(.14, .20, .45, .85)
-        GC.rectangle('fill', prevX + 240, prevY + prevH - 58, 215, 46, 6)
-        GC.setColor(.45, .65, .95, .8)
-        GC.setLineWidth(1)
-        GC.rectangle('line', prevX + 240, prevY + prevH - 58, 215, 46, 6)
-        GC.setColor(.90, .94, 1, 1)
-        setFont(15)
-        GC.mStr("🎨 Color Settings", prevX + 347, prevY + prevH - 44)
+        -- Bottom Action Buttons
+        -- Button 1: Equip / Active (x = prevX + 15..prevX + 235)
+        local isHovBtn1 = (mx >= prevX + 15 and mx <= prevX + 235 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
+        if isEq then
+            GC.setColor(.12, .40, .22, .9)
+            GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 220, 46, 6)
+            GC.setColor(.35, 1, .55, 1)
+            GC.setLineWidth(1.5)
+            GC.rectangle('line', prevX + 15, prevY + prevH - 58, 220, 46, 6)
+            GC.setColor(1, 1, 1, 1)
+            setFont(14)
+            GC.mStr("● Active Skin", prevX + 125, prevY + prevH - 44)
+        else
+            GC.setColor(isHovBtn1 and .25 or .18, isHovBtn1 and .55 or .40, isHovBtn1 and 1 or .85, .95)
+            GC.rectangle('fill', prevX + 15, prevY + prevH - 58, 220, 46, 6)
+            GC.setColor(.65, .85, 1, 1)
+            GC.setLineWidth(1.5)
+            GC.rectangle('line', prevX + 15, prevY + prevH - 58, 220, 46, 6)
+            GC.setColor(1, 1, 1, 1)
+            setFont(14)
+            GC.mStr("✓ Equip This Skin", prevX + 125, prevY + prevH - 44)
+        end
+
+        -- Button 2: Delete (if custom) or Color Settings (if built-in) (x = prevX + 245..prevX + 455)
+        local isHovBtn2 = (mx >= prevX + 245 and mx <= prevX + prevW - 15 and my >= prevY + prevH - 58 and my <= prevY + prevH - 12)
+        if isUser then
+            GC.setColor(isHovBtn2 and .75 or .60, isHovBtn2 and .20 or .15, isHovBtn2 and .25 or .20, .9)
+            GC.rectangle('fill', prevX + 245, prevY + prevH - 58, 210, 46, 6)
+            GC.setColor(.95, .45, .50, .9)
+            GC.setLineWidth(1.5)
+            GC.rectangle('line', prevX + 245, prevY + prevH - 58, 210, 46, 6)
+            GC.setColor(1, 1, 1, 1)
+            setFont(14)
+            GC.mStr("🗑 Delete Skin", prevX + 350, prevY + prevH - 44)
+        else
+            GC.setColor(isHovBtn2 and .22 or .12, isHovBtn2 and .28 or .16, isHovBtn2 and .55 or .35, .85)
+            GC.rectangle('fill', prevX + 245, prevY + prevH - 58, 210, 46, 6)
+            GC.setColor(.45, .60, .95, .8)
+            GC.setLineWidth(1)
+            GC.rectangle('line', prevX + 245, prevY + prevH - 58, 210, 46, 6)
+            GC.setColor(.90, .94, 1, 1)
+            setFont(14)
+            GC.mStr("🎨 Color Settings", prevX + 350, prevY + prevH - 44)
+        end
     end
 
     -- ════════════════════════════════════════════════════════════
@@ -1480,11 +1643,11 @@ function scene.draw()
         local pubSkinFullName = curCustomName and ('[User] ' .. curCustomName)
         GC.setColor(1, 1, 1, .98)
         setFont(22)
-        GC.print("Live Preview: " .. (pubTitleBox.value ~= "" and pubTitleBox.value or curCustomName), prevX + 24, prevY + 20)
+        GC.print(fitText("Live Preview: " .. (pubTitleBox:getText() ~= "" and pubTitleBox:getText() or curCustomName), prevW - 48), prevX + 24, prevY + 20)
 
         GC.setColor(.55, .75, 1, .9)
         setFont(13)
-        GC.print("Author: " .. (pubAuthorBox.value ~= "" and pubAuthorBox.value or "Anonymous"), prevX + 24, prevY + 50)
+        GC.print(fitText("Author: " .. (pubAuthorBox:getText() ~= "" and pubAuthorBox:getText() or "Anonymous"), prevW - 48), prevX + 24, prevY + 50)
 
         drawTetrominoRow(nil, pubSkinFullName, prevX + 40, prevY + 120, 1.1, t)
 
