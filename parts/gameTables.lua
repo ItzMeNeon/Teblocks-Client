@@ -665,7 +665,7 @@ do-- Userdata tables
         msaa=0,
         bg='on',
         bgAlpha=.26,
-        defaultBG='space',
+        defaultBG='synthwave',
         lockBG=false,
         noTheme=false,
         powerInfo=false,

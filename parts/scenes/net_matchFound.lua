@@ -90,23 +90,35 @@ function scene.draw()
         gc_setColor(1,1,1,flashA)
         gc_rectangle('fill',0,0,1280,720)
 
-        local myName=USERS.getUsername(USER.uid) or "You"
-        local oppName="???"
-        if NET.matchFoundOppId then
-            oppName=USERS.getUsername(NET.matchFoundOppId) or "Player"
+        local myName = USERS.getUsername(USER.uid) or "You"
+        local oppName = NET.matchFoundOppName
+        if (not oppName or oppName == "Opponent" or oppName == "Player") and NET.matchFoundOppId then
+            local un = USERS.getUsername(NET.matchFoundOppId)
+            if un and un ~= "" and un ~= "Player" then oppName = un end
         end
+        oppName = oppName or "Opponent"
+
+        local myElo = (USER and USER.uid and STAT.elo) or 1200
+        local oppElo = NET.matchFoundOppElo or 1200
 
         local nameT = math.min(elapsed / 1.4, 1)
         local nameEase = 1 - (1 - nameT)^3
         local mySlide = (1 - nameEase) * -650
         local oppSlide = (1 - nameEase) * 650
 
-        setFont(46)
+        setFont(44)
         gc_setColor(COLOR.lG)
-        gc_printf(myName, mySlide, 230, 640, 'center')
+        gc_printf(myName, mySlide, 210, 640, 'center')
+        setFont(22)
+        gc_setColor(.7, 1, .7, .85)
+        gc_printf(tostring(myElo) .. " ELO", mySlide, 260, 640, 'center')
 
+        setFont(44)
         gc_setColor(COLOR.lR)
-        gc_printf(oppName, 640 + oppSlide, 410, 640, 'center')
+        gc_printf(oppName, 640 + oppSlide, 400, 640, 'center')
+        setFont(22)
+        gc_setColor(1, .7, .7, .85)
+        gc_printf(tostring(oppElo) .. " ELO", 640 + oppSlide, 450, 640, 'center')
 
         local vsIntroT = math.min(math.max(0, elapsed - 0.5) / 1.0, 1)
         local vsEase = 1 - (1 - vsIntroT)^3
@@ -146,7 +158,12 @@ function scene.draw()
         local titleEase = 1 - (1 - titleT)^3
         setFont(30)
         gc_setColor(COLOR.Z[1], COLOR.Z[2], COLOR.Z[3], 0.55 + 0.45 * titleEase)
-        gc_printf(text.WidgetText.net_ranked.matchFound or "Match Found!", 0, 120, 1280, 'center')
+        gc_printf(text.WidgetText.net_ranked.matchFound or "Match Found!", 0, 110, 1280, 'center')
+
+        local cd = math.max(0, NET.matchFoundCountdown or 0)
+        setFont(22)
+        gc_setColor(COLOR.lY[1], COLOR.lY[2], COLOR.lY[3], 0.85 * vsEase)
+        gc_printf(string.format("Starting in %.1fs", cd), 0, 530, 1280, 'center')
 
         gc_pop()
         return

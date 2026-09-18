@@ -4,6 +4,7 @@ local gc_setColor=gc.setColor
 local gc_setLineWidth=gc.setLineWidth
 local gc_print,gc_printf=gc.print,gc.printf
 local gc_draw=gc.draw
+local gc_rectangle,gc_circle=gc.rectangle,gc.circle
 local setFont,mStr=FONT.set,GC.mStr
 
 local ins=table.insert
@@ -11,9 +12,22 @@ local ins=table.insert
 local SCR,VK,NET,NETPLY=SCR,VK,NET,NETPLY
 local PLAYERS,GAME=PLAYERS,GAME
 local ROLLBACK=ROLLBACK
+local NET_BAR=require 'parts.netTopBar'
+local REPORT=require 'parts.reportModal'
+local AC=require 'parts.anticheatClient'
 
 local textBox=NET.textBox
 local inputBox=NET.inputBox
+
+local TEAM_GROUPS = {
+    {g=0, label="FFA", x=495, w=46},
+    {g=1, label="1",   x=547, w=36},
+    {g=2, label="2",   x=589, w=36},
+    {g=3, label="3",   x=631, w=36},
+    {g=4, label="4",   x=673, w=36},
+    {g=5, label="5",   x=715, w=36},
+    {g=6, label="6",   x=757, w=36},
+}
 
 local playing
 local paused
@@ -45,11 +59,7 @@ end
 -- same Player:update calls. Default off — visible behavior is identical to
 -- the legacy loop until the integration test (slice 4) flips the flag.
 local function _stepPlayers(dt)
-    if NET._rollbackEnabled and ROLLBACK then
-        ROLLBACK.step(PLAYERS, dt)
-    else
-        for p=1,#PLAYERS do PLAYERS[p]:update(dt) end
-    end
+    for p=1,#PLAYERS do PLAYERS[p]:update(dt) end
 end
 local function _replaySeekTo(frame)
     if frame<NET._replayCur then
@@ -174,6 +184,8 @@ function scene.enter()
     abandonCount=0
     lastUpstreamTime=0
     upstreamProgress=1
+    REPORT.close()
+    AC.reset()
 
     if SCN.prev=='setting_game' then
         NET.player_updateConf()
@@ -186,6 +198,7 @@ function scene.enter()
 end
 function scene.leave()
     TASK.unlock('netPlaying')
+    REPORT.close()
     -- A ranked replay borrows the live net_game/netBattle machinery and replaces
     -- the room state with a throwaway one. Restore the real (post-match) room if
     -- we had one, otherwise clear it so ranked matchmaking isn't left pointing at
@@ -203,7 +216,97 @@ function scene.leave()
     end
 end
 
-scene.mouseDown=NULL
+local function getMousePos()
+    if SCR and SCR.xOy then
+        return SCR.xOy:inverseTransformPoint(love.mouse.getPosition())
+    end
+    return love.mouse.getPosition()
+end
+
+function scene.mouseDown(x,y)
+    if REPORT.isOpen() then
+        REPORT.mouseDown(x, y)
+        return true
+    end
+
+    if not playing and not GAME.replaying then
+        -- Top bar: check back (leave room) + persistent queue pill
+        local barAct = NET_BAR.mouseDown(x, y)
+        if barAct == 'back' then
+            _quit()
+            return true
+        elseif barAct then
+            return true
+        end
+
+        local isMatchPlaying = NET.roomState and NET.roomState.state == 'Playing'
+        local myP = NETPLY.map[USER.uid]
+
+        -- Check if player card clicked to report
+        local ply = NETPLY.getPlayerAt and NETPLY.getPlayerAt(x, y)
+        if ply and ply.uid and ply.uid ~= USER.uid then
+            REPORT.open(ply.uid, ply.name or ply.username or ("Player " .. ply.uid), NET.room and NET.room.name or "", NET.matchId or "")
+            SFX.play('click')
+            return true
+        end
+
+        -- Group / Team selector buttons (x=495..793, y=78..112)
+        if y >= 78 and y <= 112 then
+            for _, grp in ipairs(TEAM_GROUPS) do
+                if x >= grp.x and x <= grp.x + grp.w then
+                    NET.player_joinGroup(grp.g)
+                    SFX.play('click')
+                    return true
+                end
+            end
+        end
+
+        -- Ready / Cancel button (x=920..1220, y=386..440)
+        if x >= 920 and x <= 1220 and y >= 386 and y <= 440 then
+            if isMatchPlaying then
+                MES.new('info', "Match in progress — waiting for next round")
+            elseif myP and (myP.playMode == 'Spectator' or myP.readyMode == 'Ready') then
+                _setCancel()
+                SFX.play('click')
+            else
+                _setReady()
+                SFX.play('click')
+            end
+            return true
+        end
+
+        -- Spectate / Participate button (x=920..1220, y=448..490)
+        if x >= 920 and x <= 1220 and y >= 448 and y <= 490 then
+            if myP and myP.playMode == 'Spectator' then
+                _setCancel()
+            else
+                _setSpectate()
+            end
+            SFX.play('click')
+            return true
+        end
+
+        -- Game Settings button (x=920..1220, y=498..540)
+        if x >= 920 and x <= 1220 and y >= 498 and y <= 540 then
+            SFX.play('click')
+            _gotoSetting()
+            return true
+        end
+
+        -- Chat Toggle button (x=920..1220, y=548..590)
+        if x >= 920 and x <= 1220 and y >= 548 and y <= 590 then
+            _switchChat()
+            SFX.play('click')
+            return true
+        end
+
+        -- Leave Room button (x=920..1220, y=598..640)
+        if x >= 920 and x <= 1220 and y >= 598 and y <= 640 then
+            _quit()
+            return true
+        end
+    end
+end
 function scene.mouseMove(x,y) NETPLY.mouseMove(x,y) end
 function scene.touchDown(x,y)
     if not playing or GAME.replaying then NETPLY.mouseMove(x,y) return end
@@ -251,6 +354,32 @@ function scene.touchMove()
     end
 end
 function scene.keyDown(key,isRep)
+    if REPORT.isOpen() then
+        return REPORT.keyDown(key, isRep)
+    end
+
+    if not playing and not GAME.replaying and inputBox.hide then
+        if key == 'space' then
+            local isMatchPlaying = NET.roomState and NET.roomState.state == 'Playing'
+            if isMatchPlaying then
+                MES.new('info', "Match in progress — waiting for next round")
+            else
+                local myP = NETPLY.map[USER.uid]
+                if myP and (myP.playMode == 'Spectator' or myP.readyMode == 'Ready') then
+                    _setCancel()
+                else
+                    _setReady()
+                end
+                SFX.play('click')
+            end
+            return true
+        elseif key == 's' then
+            SFX.play('click')
+            _gotoSetting()
+            return true
+        end
+    end
+
     if GAME.replaying and paused then
         if key=='escape' then paused=false return end
         if key=='q' then _quit() return end
@@ -318,6 +447,29 @@ function scene.keyDown(key,isRep)
                     end
                 elseif cmd[1]=='/exit' or cmd[1]=='/quit' then
                     _quit()
+
+                elseif cmd[1]=='/report' then
+                    local targetName = cmd[2]
+                    if targetName and #targetName > 0 then
+                        local foundUid, foundName
+                        if NETPLY.list then
+                            for _, p in ipairs(NETPLY.list) do
+                                if p.name == targetName or tostring(p.uid) == targetName then
+                                    foundUid = p.uid
+                                    foundName = p.name
+                                    break
+                                end
+                            end
+                        end
+                        if foundUid then
+                            REPORT.open(foundUid, foundName, NET.room and NET.room.name or "", NET.matchId or "")
+                        else
+                            REPORT.open(targetName, targetName, NET.room and NET.room.name or "", NET.matchId or "")
+                        end
+                        _switchChat()
+                    else
+                        NET.textBox:push{COLOR.Y, 'Usage: /report <username or uid>'}
+                    end
 
                 -- Admin commands
                 elseif cmd[1]=='/fkick' then
@@ -390,7 +542,13 @@ function scene.gamepadUp(key)
     end
 end
 
+function scene.textInput(t)
+    if REPORT.isOpen() and REPORT.textInput(t) then return true end
+end
+
 function scene.update(dt)
+    REPORT.update(dt)
+    AC.update(dt)
     if not GAME.replaying and WS.status('game')~='running' then
         TASK.unlock('netPlaying')
         NET.ws_close()
@@ -426,8 +584,7 @@ function scene.update(dt)
                 checkWarning(P1,dt)
 
                 -- Upload stream
-                local isRanked=NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked'
-                local streamInterval=isRanked and 1 or 8
+                local streamInterval=4
                 if not GAME.replaying and not NET.spectate and P1.frameRun-lastUpstreamTime>streamInterval then
                     local stream
                     if not GAME.rep[upstreamProgress] then
@@ -440,34 +597,20 @@ function scene.update(dt)
                     elseif #stream%3==2 then
                         stream=stream.."\0\0\0\0"
                     end
-                    -- Ranked rooms are snapshot-driven (server 1410): the legacy
-                    -- player_stream replay is not needed and would conflict with
-                    -- the authoritative snapshot path. Skip the stream upload in
-                    -- ranked rooms; the opponent's board comes from snapshots.
-                    if not isRanked then
-                        NET.player_stream(stream)
-                    end
-                    -- Flush any queued authoritative-sim inputs (1413) at the
-                    -- same cadence as the legacy stream upload. No-op when
-                    -- not in a ranked room (NET._inputSubmitBuf stays empty).
-                    NET.flushInputs()
+                    NET.player_stream(stream)
                     lastUpstreamTime=PLAYERS[1].alive and P1.frameRun or 1e99
                 end
             end
         end
     else
-        if NET._pendingMatchFoundScene then
-            NET._pendingMatchFoundScene=nil
-            NET.matchFoundCountdown=10
-            NET.matchFoundTime=love.timer.getTime()
-            SCN.go('net_matchFound')
-            return
-        end
         if not TASK.getLock('netPlaying') then
             if NET.matchFoundPending and NET.matchFoundCountdown>0 then
                 NET.updateMatchFoundCountdown(dt)
             end
             NETPLY.update(dt)
+            if not GAME.replaying then
+                NET_BAR.update(dt)
+            end
         else
             playing=true
             TASK.lock('netPlaying')
@@ -534,6 +677,12 @@ function scene.draw()
             end
         end
 
+        if NET.roomState and NET.roomState.info and NET.roomState.info.type == 'ranked' and not GAME.replaying then
+            setFont(16)
+            gc_setColor(.95, .80, .30, .85)
+            GC.mStr("⚡ RANKED 1V1 ⚡", 640, 14)
+        end
+
         -- Replay UI
         if GAME.replaying then
             -- Top "REPLAY" banner: fades out when the replay ends and fades
@@ -568,53 +717,301 @@ function scene.draw()
             gc_print(text.spectating,940,0)
         end
     else
-        if textBox.hide then
-            -- Users
-            NETPLY.draw()
+        local t = love.timer.getTime()
+        local mx, my = getMousePos()
 
-            -- Room's capacity + private?
-            gc_setColor(1,1,1)
-            setFont(40)
-            gc_print(#NETPLY.list.."/"..NET.roomState.capacity,70,655)
-            if NET.roomState.private then
-                gc_draw(IMG.lock,30,668)
-            end
-        else
-            -- Room's capacity + private?
-            setFont(40)
-            gc_setColor(1,1,1)
-            gc_printf(#NETPLY.list.."/"..NET.roomState.capacity,1120,540,100,'right')
-            if NET.roomState.private then
-                gc_draw(IMG.lock,1070,553)
-            end
-            setFont(30)
-            -- Ready/Spectate indicator
-            if NETPLY.map[USER.uid].playMode=='Spectator' then
-                gc_printf(text.WidgetText.net_game.spectate,1020,600,240,'center')
-            elseif NETPLY.map[USER.uid].readyMode=='Ready' then
-                gc_printf(text.WidgetText.net_game.ready,1020,600,240,'center')
+        -- 1. Ambient Background Particles
+        NET_BAR.drawBG()
+
+        local myP = NETPLY.map[USER.uid]
+        local isMatchPlaying = NET.roomState and NET.roomState.state == 'Playing'
+        local roomCap = (NET.roomState and NET.roomState.capacity) or 4
+        local roomName = (NET.roomState and NET.roomState.info and NET.roomState.info.name) or "CASUAL ROOM"
+        local roomId = (NET.roomState and (NET.roomState.id or NET.roomState.roomId)) or ""
+
+        -- 2. Left Panel: Player Roster & Table (x=40, y=72, w=840, h=616)
+        local p1X, p1Y, p1W, p1H = 40, 72, 840, 616
+        gc_setColor(.06, .09, .18, .92)
+        gc_rectangle('fill', p1X, p1Y, p1W, p1H, 10)
+        gc_setColor(.22, .40, .75, .75)
+        gc_setLineWidth(1.5)
+        gc_rectangle('line', p1X, p1Y, p1W, p1H, 10)
+
+        -- Header bar
+        gc_setColor(.12, .24, .50, .85)
+        gc_rectangle('fill', p1X, p1Y, p1W, 44, 10)
+        gc_rectangle('fill', p1X, p1Y + 30, p1W, 14)
+        gc_setColor(1, 1, 1, .95)
+        setFont(16)
+        gc.print("PLAYERS IN ROOM", p1X + 16, p1Y + 12)
+
+        -- Capacity pill
+        local capStr = (#NETPLY.list) .. "/" .. roomCap .. " Players"
+        setFont(12)
+        gc_setColor(.18, .30, .60, .85)
+        gc_rectangle('fill', p1X + 180, p1Y + 8, 120, 28, 6)
+        gc_setColor(.55, .80, 1.0, .8)
+        gc_setLineWidth(1)
+        gc_rectangle('line', p1X + 180, p1Y + 8, 120, 28, 6)
+        gc_setColor(1, 1, 1, .95)
+        gc.printf(capStr, p1X + 180, p1Y + 14, 120, 'center')
+
+        -- Private lock icon
+        if NET.roomState and NET.roomState.private and IMG and IMG.lock then
+            gc_setColor(1, 1, 1, .9)
+            gc_draw(IMG.lock, p1X + 310, p1Y + 12)
+        end
+
+        -- Team Pills Header Label
+        setFont(11)
+        gc_setColor(.65, .78, 1.0, .8)
+        gc.print("Team:", 455, p1Y + 15)
+
+        -- Team selector pills
+        local myGroup = (myP and myP.group) or 0
+        for _, grp in ipairs(TEAM_GROUPS) do
+            local isSel = (myGroup == grp.g)
+            local isHov = (mx >= grp.x and mx <= grp.x + grp.w and my >= 78 and my <= 112)
+            local gCol = GROUP_COLORS[grp.g] or COLOR.Z
+            if isSel then
+                gc_setColor(gCol[1], gCol[2], gCol[3], 0.95)
+                gc_rectangle('fill', grp.x, 80, grp.w, 28, 5)
+                gc_setColor(1, 1, 1, 1)
+                gc_setLineWidth(2)
+                gc_rectangle('line', grp.x, 80, grp.w, 28, 5)
+                gc_setColor(0, 0, 0, 1)
             else
-                gc_printf('-----',1020,600,240,'center')
+                gc_setColor(gCol[1], gCol[2], gCol[3], isHov and 0.45 or 0.20)
+                gc_rectangle('fill', grp.x, 80, grp.w, 28, 5)
+                gc_setColor(gCol[1], gCol[2], gCol[3], isHov and 0.9 or 0.6)
+                gc_setLineWidth(1)
+                gc_rectangle('line', grp.x, 80, grp.w, 28, 5)
+                gc_setColor(1, 1, 1, isHov and 1 or 0.85)
+            end
+            setFont(11)
+            gc.printf(grp.label, grp.x, 87, grp.w, 'center')
+        end
+
+        -- Mid-Game In-Progress Notice Banner
+        if isMatchPlaying then
+            local pulse = 0.85 + 0.15 * math.sin(t * 4)
+            gc_setColor(.85, .50, .10, .92 * pulse)
+            gc_rectangle('fill', 50, 122, 820, 46, 8)
+            gc_setColor(1.0, .85, .30, 1)
+            gc_setLineWidth(1.5)
+            gc_rectangle('line', 50, 122, 820, 46, 8)
+            gc_setColor(1, 1, 1, 1)
+            setFont(15)
+            gc.printf("⚔️ MATCH IN PROGRESS — Waiting in room lobby for the current round to conclude", 50, 136, 820, 'center')
+        elseif NET.roomAllReady then
+            local pulse = 0.80 + 0.20 * math.sin(t * 6)
+            gc_setColor(.12, .65, .45, .90 * pulse)
+            gc_rectangle('fill', 50, 122, 820, 46, 8)
+            gc_setColor(.50, 1.0, .80, 1)
+            gc_setLineWidth(2)
+            gc_rectangle('line', 50, 122, 820, 46, 8)
+            gc_setColor(1, 1, 1, 1)
+            setFont(16)
+            gc.printf("⚡ ALL PLAYERS READY — STARTING MATCH...", 50, 136, 820, 'center')
+        end
+
+        -- Render player cards via NETPLY
+        NETPLY.draw()
+
+        -- 3. Right Panel: Room Control & Status (x=900, y=72, w=340, h=616)
+        local p2X, p2Y, p2W, p2H = 900, 72, 340, 616
+        gc_setColor(.06, .09, .18, .92)
+        gc_rectangle('fill', p2X, p2Y, p2W, p2H, 10)
+        gc_setColor(.22, .40, .75, .75)
+        gc_setLineWidth(1.5)
+        gc_rectangle('line', p2X, p2Y, p2W, p2H, 10)
+
+        -- Header
+        gc_setColor(.12, .24, .50, .85)
+        gc_rectangle('fill', p2X, p2Y, p2W, 44, 10)
+        gc_rectangle('fill', p2X, p2Y + 30, p2W, 14)
+        gc_setColor(1, 1, 1, .95)
+        setFont(16)
+        gc.print("ROOM CONTROLS", p2X + 16, p2Y + 12)
+
+        -- Room Overview Card
+        gc_setColor(.09, .13, .26, .85)
+        gc_rectangle('fill', 916, 126, 308, 130, 8)
+        gc_setColor(.25, .40, .75, .6)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 916, 126, 308, 130, 8)
+
+        setFont(16)
+        gc_setColor(1, 1, 1, 1)
+        gc.printf(roomName, 924, 134, 292, 'center')
+
+        if #tostring(roomId) > 0 then
+            setFont(12)
+            gc_setColor(.55, .75, 1.0, .85)
+            gc.printf("Room #" .. tostring(roomId), 924, 156, 292, 'center')
+        end
+
+        -- Host badge
+        local hostName = "Host"
+        for i=1,#NETPLY.list do
+            if NETPLY.list[i].role == 'Admin' then
+                hostName = USERS.getUsername(NETPLY.list[i].uid) or "Host"
+                break
             end
         end
+        setFont(12)
+        gc_setColor(.85, .88, .95, .85)
+        gc.printf("👑 Host: " .. hostName, 924, 180, 292, 'center')
 
-        -- Room's name
-        gc_setColor(1,1,1)
-        setFont(25)
-        gc_printf(NET.roomState.info.name,0,685,1270,'right')
+        local modeStr = (NET.roomState and NET.roomState.info and NET.roomState.info.type) or "Casual"
+        local rData = NET.roomState and NET.roomState.data
+        local dropVal = (rData and rData.drop) or "Normal"
+        local seqVal = (rData and rData.sequence) or "bag"
+        local lifeVal = (rData and rData.life) or 0
+        local lifeStr = (lifeVal == 0) and "Endless" or (lifeVal .. " Lives")
+        gc_setColor(.65, .75, .90, .75)
+        gc.printf("Mode: " .. modeStr:upper() .. " VERSUS", 924, 198, 292, 'center')
+        gc.printf(("Gravity: %ss • Sequence: %s"):format(tostring(dropVal), tostring(seqVal)), 924, 216, 292, 'center')
+        gc.printf(("Format: %s • Cap: %d Players"):format(lifeStr, roomCap), 924, 234, 292, 'center')
 
-        -- Ready & Set mark
-        setFont(50)
-        if NET.roomAllReady then
-            gc_setColor(.6,.95,1,.9)
-            mStr(text.ready,640,15)
+        -- Player Status Card (y=268..376)
+        gc_setColor(.09, .13, .26, .85)
+        gc_rectangle('fill', 916, 268, 308, 104, 8)
+        gc_setColor(.25, .40, .75, .6)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 916, 268, 308, 104, 8)
+
+        setFont(11)
+        gc_setColor(.65, .75, .90, .8)
+        gc.print("YOUR STATUS", 930, 278)
+
+        local isReady = myP and myP.readyMode == 'Ready'
+        local isSpectator = myP and myP.playMode == 'Spectator'
+
+        if isMatchPlaying then
+            gc_setColor(.85, .50, .10, .9)
+            gc_rectangle('fill', 930, 300, 280, 34, 6)
+            gc_setColor(1, 1, 1, 1)
+            setFont(13)
+            gc.printf("⏳ WAITING FOR NEXT ROUND", 930, 310, 280, 'center')
+        elseif isReady then
+            local rGlow = 0.8 + 0.2 * math.sin(t * 4)
+            gc_setColor(.12, .65, .35, .9 * rGlow)
+            gc_rectangle('fill', 930, 300, 280, 34, 6)
+            gc_setColor(.6, 1, .7, 1)
+            gc_setLineWidth(1.5)
+            gc_rectangle('line', 930, 300, 280, 34, 6)
+            gc_setColor(1, 1, 1, 1)
+            setFont(13)
+            gc.printf("✓ READY TO PLAY", 930, 310, 280, 'center')
+        elseif isSpectator then
+            gc_setColor(.15, .45, .70, .9)
+            gc_rectangle('fill', 930, 300, 280, 34, 6)
+            gc_setColor(.5, .8, 1, 1)
+            gc_setLineWidth(1)
+            gc_rectangle('line', 930, 300, 280, 34, 6)
+            gc_setColor(1, 1, 1, 1)
+            setFont(13)
+            gc.printf("👁 SPECTATOR MODE", 930, 310, 280, 'center')
+        else
+            gc_setColor(.22, .26, .38, .9)
+            gc_rectangle('fill', 930, 300, 280, 34, 6)
+            gc_setColor(.45, .50, .65, 1)
+            gc_setLineWidth(1)
+            gc_rectangle('line', 930, 300, 280, 34, 6)
+            gc_setColor(.85, .90, 1, .9)
+            setFont(13)
+            gc.printf("○ NOT READY", 930, 310, 280, 'center')
         end
 
-        -- Profile
-        drawSelfProfile()
+        setFont(11)
+        gc_setColor(.55, .65, .85, .75)
+        gc.printf("Press [Space] to toggle Ready", 920, 346, 300, 'center')
 
-        -- Player count
-        drawOnlinePlayerCount()
+        -- Action Button 1: Ready / Cancel (y=386..440)
+        local isBtn1Hov = (mx >= 920 and mx <= 1220 and my >= 386 and my <= 440)
+        if isMatchPlaying then
+            gc_setColor(.20, .24, .32, .7)
+            gc_rectangle('fill', 920, 386, 300, 54, 8)
+            gc_setColor(.40, .45, .55, .5)
+            gc_setLineWidth(1)
+            gc_rectangle('line', 920, 386, 300, 54, 8)
+            gc_setColor(.65, .70, .80, .7)
+            setFont(15)
+            gc.printf("Round In Progress...", 920, 404, 300, 'center')
+        elseif isReady or isSpectator then
+            gc_setColor(isBtn1Hov and .75 or .55, isBtn1Hov and .22 or .15, isBtn1Hov and .25 or .18, .92)
+            gc_rectangle('fill', 920, 386, 300, 54, 8)
+            gc_setColor(1.0, .55, .55, isBtn1Hov and 1 or .8)
+            gc_setLineWidth(1.5)
+            gc_rectangle('line', 920, 386, 300, 54, 8)
+            gc_setColor(1, 1, 1, 1)
+            setFont(16)
+            gc.printf("CANCEL READY", 920, 404, 300, 'center')
+        else
+            local rPulse = 0.85 + 0.15 * math.sin(t * 4)
+            gc_setColor(.12, isBtn1Hov and .75 or .58, .38, .92)
+            gc_rectangle('fill', 920, 386, 300, 54, 8)
+            gc_setColor(.55, 1.0, .75, isBtn1Hov and 1 or rPulse)
+            gc_setLineWidth(2)
+            gc_rectangle('line', 920, 386, 300, 54, 8)
+            gc_setColor(1, 1, 1, 1)
+            setFont(17)
+            gc.printf("READY UP  ✓", 920, 402, 300, 'center')
+        end
+
+        -- Action Button 2: Spectate / Participate (y=448..490)
+        local isBtn2Hov = (mx >= 920 and mx <= 1220 and my >= 448 and my <= 490)
+        gc_setColor(isBtn2Hov and .18 or .10, isBtn2Hov and .28 or .16, isBtn2Hov and .50 or .30, .85)
+        gc_rectangle('fill', 920, 448, 300, 42, 6)
+        gc_setColor(.35, .55, .85, isBtn2Hov and .9 or .6)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 920, 448, 300, 42, 6)
+        gc_setColor(1, 1, 1, isBtn2Hov and 1 or .85)
+        setFont(13)
+        gc.printf(isSpectator and "SWITCH TO PLAYER" or "SPECTATE MATCH", 920, 460, 300, 'center')
+
+        -- Action Button 3: Settings (y=498..540)
+        local isBtn3Hov = (mx >= 920 and mx <= 1220 and my >= 498 and my <= 540)
+        gc_setColor(isBtn3Hov and .18 or .10, isBtn3Hov and .28 or .16, isBtn3Hov and .50 or .30, .85)
+        gc_rectangle('fill', 920, 498, 300, 42, 6)
+        gc_setColor(.35, .55, .85, isBtn3Hov and .9 or .6)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 920, 498, 300, 42, 6)
+        gc_setColor(1, 1, 1, isBtn3Hov and 1 or .85)
+        setFont(13)
+        gc.printf("⚙ CONTROLS & HANDLING [S]", 920, 510, 300, 'center')
+
+        -- Action Button 4: Chat (y=548..590)
+        local isBtn4Hov = (mx >= 920 and mx <= 1220 and my >= 548 and my <= 590)
+        gc_setColor(isBtn4Hov and .18 or .10, isBtn4Hov and .28 or .16, isBtn4Hov and .50 or .30, .85)
+        gc_rectangle('fill', 920, 548, 300, 42, 6)
+        gc_setColor(.35, .55, .85, isBtn4Hov and .9 or .6)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 920, 548, 300, 42, 6)
+        gc_setColor(1, 1, 1, isBtn4Hov and 1 or .85)
+        setFont(13)
+        gc.printf("💬 ROOM CHAT [/]", 920, 560, 300, 'center')
+
+        -- Action Button 5: Leave Room (y=598..640)
+        local isBtn5Hov = (mx >= 920 and mx <= 1220 and my >= 598 and my <= 640)
+        gc_setColor(isBtn5Hov and .30 or .18, isBtn5Hov and .12 or .08, isBtn5Hov and .15 or .10, .85)
+        gc_rectangle('fill', 920, 598, 300, 42, 6)
+        gc_setColor(.65, .25, .30, isBtn5Hov and .9 or .6)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 920, 598, 300, 42, 6)
+        gc_setColor(1.0, .75, .75, isBtn5Hov and 1 or .85)
+        setFont(13)
+        gc.printf("← LEAVE ROOM [ESC]", 920, 610, 300, 'center')
+
+        -- 4. Top Bar
+        NET_BAR.draw(roomName:upper(), "← Leave Room")
+
+        -- 5. Chat Overlay if open
+        if not textBox.hide then
+            gc_setColor(0, 0, 0, 0.70)
+            gc.rectangle('fill', 0, 0, 1280, 720)
+        end
     end
 
     -- New message
@@ -640,8 +1037,8 @@ function scene.draw()
         mStr("Press Q to quit replay",640,405)
     end
 end
-local function _hideF_ready() return not (textBox.hide) or playing or (NETPLY.map[USER.uid].playMode=='Spectator' or NETPLY.map[USER.uid].readyMode=='Ready') end
-local function _hideF_standby() return not (textBox.hide) or playing or not (NETPLY.map[USER.uid].playMode=='Spectator' or NETPLY.map[USER.uid].readyMode=='Ready') end
+local function _hideF_ready() return true end
+local function _hideF_standby() return true end
 local function _hideF_hideChat() return textBox.hide end
 scene.widgetList={
     textBox,
@@ -684,8 +1081,8 @@ scene.widgetList={
 --  WIDGET.newKey{x=1175,y=460,w=50,font=40,fText=CHAR.zChan.           ,code=function() inputBox:addText(                      ) end,hideF=_hideF_hideChat},
     WIDGET.newKey{x=1240,y=460,w=50,font=40,fText=CHAR.zChan.none       ,code=function() inputBox:addText(CHAR.zChan.none       ) end,hideF=_hideF_hideChat},
 
-    WIDGET.newKey{name='chat',    x=390,y=45,w=60,fText="···",                code=_switchChat,hideF=function() return GAME.replaying or (NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked') end},
-    WIDGET.newKey{name='quit',    x=890,y=45,w=60,font=30,fText=CHAR.icon.cross_thick,code=_quit,hideF=function() return GAME.replaying or (NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked') end},
+    WIDGET.newKey{name='chat',    x=390,y=45,w=60,fText="···",                code=_switchChat,hideF=function() return true end},
+    WIDGET.newKey{name='quit',    x=890,y=45,w=60,font=30,fText=CHAR.icon.cross_thick,code=_quit,hideF=function() return true end},
 
     WIDGET.newKey{name='replayPause', x=40, y=50, w=60, font=40, fText=CHAR.icon.pause,   code=function() paused=not paused end,                                                                                       hideF=function() return not GAME.replaying end},
     WIDGET.newKey{name='replaySpd1',  x=105,y=50, w=60, font=40, fText=CHAR.icon.speedOne,  code=function() GAME.replaySpeed=1  end,                                                                                       hideF=function() return not GAME.replaying end},
@@ -700,6 +1097,7 @@ function scene.overDraw()
         gc_setColor(0,0,0,1)
         gc.rectangle('fill',0,0,1280,720)
     end
+    REPORT.draw()
 end
 
 return scene

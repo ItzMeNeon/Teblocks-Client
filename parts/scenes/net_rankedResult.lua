@@ -3,6 +3,7 @@ local scene={}
 local CARD=require'parts.userCard'
 local AUTH=require'parts.authModal'
 local LOBBY=require'parts.lobbyPanel'
+local REPORT=require'parts.reportModal'
 
 local gc=love.graphics
 local gc_setColor,gc_setLineWidth=gc.setColor,gc.setLineWidth
@@ -28,6 +29,7 @@ function scene.enter()
     CARD.enter()
     BG.set()
     LOBBY.reset()
+    REPORT.close()
     R=NET.rankedResult or false
     DiscordRPC.update("Ranked Results")
 end
@@ -35,10 +37,12 @@ end
 function scene.leave()
     CARD.leave()
     AUTH.close()
+    REPORT.close()
     NET.rankedResult=false
 end
 
 function scene.keyDown(key,rep)
+    if REPORT.isOpen() then return REPORT.keyDown(key,rep) end
     if AUTH.isOpen() then return AUTH.keyDown(key,rep) end
     if LOBBY.keyDown(key) then return true end
     if (key=='escape' or key=='back') and not rep then
@@ -52,26 +56,26 @@ function scene.keyDown(key,rep)
 end
 
 function scene.textInput(t)
+    if REPORT.isOpen() and REPORT.textInput(t) then return true end
     if AUTH.isOpen() and AUTH.textInput(t) then return true end
     if LOBBY.textInput(t) then return true end
 end
 
 function scene.mouseDown(x,y)
+    if REPORT.isOpen() then
+        return REPORT.mouseDown(x,y)
+    end
     if AUTH.isOpen() then
         AUTH.mouseClick(x,y)
         return true
     end
+    if CARD.mouseClick(x,y) then return true end
+    if LOBBY.mouseClick(x,y) then return true end
 end
 scene.touchDown = scene.mouseDown
 
-function scene.mouseClick(x,y)
-    if CARD.mouseClick(x,y) then return true end
-    if AUTH.mouseClick(x,y) then return true end
-    if LOBBY.mouseClick(x,y) then return true end
-end
-scene.touchClick = scene.mouseClick
-
 function scene.update(dt)
+    REPORT.update(dt)
     CARD.update(dt)
     AUTH.update(dt)
     LOBBY.update(dt)
@@ -139,9 +143,17 @@ function scene.overDraw()
     LOBBY.drawToggleButtons()
     CARD.draw()
     AUTH.draw()
+    REPORT.draw()
 end
 
 scene.widgetList={
+    WIDGET.newButton{name='report',  x=180,y=620,w=220,h=80,color='lR',font=24,fText="Report",
+        hideF=function() return not (R and R.oppId and R.oppId ~= 0 and R.oppId ~= USER.uid) end,
+        code=function()
+            if R and R.oppId then
+                REPORT.open(R.oppId, _name(R.oppId), "Ranked 1v1", R.matchId or "")
+            end
+        end},
     WIDGET.newKey{name='watch',   x=470,y=520,w=340,h=80,font=34,color='lB',
         code=function() NET.watchRankedReplay() end},
     WIDGET.newKey{name='rematch', x=490,y=620,w=300,h=80,font=34,color='lG',

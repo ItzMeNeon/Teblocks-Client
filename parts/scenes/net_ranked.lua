@@ -108,15 +108,21 @@ function scene.mouseDown(x, y)
     if CARD.mouseClick(x, y) then return true end
     if LOBBY.mouseClick(x, y) then return true end
 
-    -- Top bar back button
-    if NET_BAR.checkBackClick(x, y) then
+    -- Top bar (Back button + persistent matchmaking pill)
+    local barAct = NET_BAR.mouseDown(x, y)
+    if barAct == 'back' then
         SFX.play('back')
         SCN.backTo('lobby')
         return true
+    elseif barAct == 'cancel_matchmaking' then
+        _cancelMatchmaking()
+        return true
+    elseif barAct then
+        return true
     end
 
-    -- Matchmaking CTA Button (x=140..590, y=435..505)
-    if x >= 140 and x <= 590 and y >= 435 and y <= 505 and not NET.matchFoundPending then
+    -- Matchmaking CTA Button / Cancel Button (x=140..590, y=525..585)
+    if x >= 140 and x <= 590 and y >= 525 and y <= 585 and not NET.matchFoundPending then
         if NET.matchmaking then
             _cancelMatchmaking()
         else
@@ -147,21 +153,12 @@ function scene.mouseDown(x, y)
     end
 end
 scene.touchDown = scene.mouseDown
-scene.mouseClick = scene.mouseDown
-scene.touchClick = scene.mouseDown
 
 function scene.update(dt)
     CARD.update(dt)
     AUTH.update(dt)
     LOBBY.update(dt)
     NET_BAR.update(dt)
-
-    if NET._pendingMatchFoundScene then
-        NET._pendingMatchFoundScene = nil
-        NET.matchFoundCountdown = 10
-        NET.matchFoundTime = love.timer.getTime()
-        SCN.go('net_matchFound')
-    end
 
     if NET.matchmaking then
         NET.searchTimer = NET.searchTimer + dt

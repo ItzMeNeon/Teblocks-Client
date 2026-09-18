@@ -182,11 +182,7 @@ function M.step(players, dt)
     for i=1,#players do
         local P=players[i]
         if P and P.update then
-            if ranked and P.type=='remote' then
-                -- Snapshot-driven: no local step. frameRun is set by snapshots.
-            else
-                P:update(dt)
-            end
+            P:update(dt)
         end
     end
     -- Phase 3: snapshot at the server's snapshot rate (every

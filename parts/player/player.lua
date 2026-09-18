@@ -581,14 +581,6 @@ local playerActions={
         -- gate will discard inputs until TEBLOCKS_SIM_AUTHORITATIVE is on,
         -- but collecting them now means the gate is the only thing keeping
         -- us from authority, not client/server plumbing.
-        if NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked' then
-            NET._pushInput(self.frameRun,keyID,false)
-            -- Flush immediately so the server's authoritative sim sees this
-            -- input on its next tick instead of waiting for the next frame's
-            -- update loop to batch it. This removes ~1 frame (16.6ms) of
-            -- input-to-opponent latency from the ranked input path.
-            NET.flushInputs()
-        end
     end
     if self.keyAvailable[keyID] and self.alive then
         if self.waiting>self.gameEnv.hurry then
@@ -609,10 +601,6 @@ function Player:releaseKey(keyID)
             GAME.repAdd(32+keyID)
         elseif self.streamProgress then
             VK.release(keyID)
-        end
-        if NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked' then
-            NET._pushInput(self.frameRun,keyID,true)
-            NET.flushInputs()
         end
     end
     self.keyPressing[keyID]=false
@@ -998,6 +986,8 @@ function Player:beAttacked(source,target_sid,send,time,line,seenCount)
     -- Only recieve the attack if you are the target.
     if self==source or self.sid~=target_sid then return end
 
+    seenCount = tonumber(seenCount) or 0
+
     if not self.inTransitAttacks then
         self.inTransitAttacks={}
     end
@@ -1009,9 +999,11 @@ function Player:beAttacked(source,target_sid,send,time,line,seenCount)
     -- Block against any in-transit attacks before recieving (this prevents passhtrough)
     for i=seenCount+1,#self.inTransitAttacks[source.sid] do
         local atk=self.inTransitAttacks[source.sid][i]
-        local cancel=MATH.min(atk.send, send)
-        atk.send=atk.send-cancel
-        send=send-cancel
+        if atk then
+            local cancel=MATH.min(atk.send, send)
+            atk.send=atk.send-cancel
+            send=send-cancel
+        end
     end
 
     self:receive(source,send,time,line)
@@ -1170,6 +1162,10 @@ function Player:freshNewBlock()
     self:freshBlockDelay(true)
 end
 function Player:lock()
+    if self==PLAYERS[1] and SCN and SCN.cur=='net_game' then
+        if not AC then pcall(function() AC=require'parts.anticheatClient' end) end
+        if AC and AC.onPieceLock then AC.onPieceLock() end
+    end
     local CB=self.cur.bk
     for i=1,#CB do
         local y=self.curY+i-1
@@ -2976,6 +2972,7 @@ local function update_streaming(P)
                     end
                     if SRC and subject then
                         subject.gameEnv.extraEventHandler['attack'](subject,SRC,
+                            targetSid,
                             P.stream[paramBase+1],
                             P.stream[paramBase+2],
                             P.stream[paramBase+3],

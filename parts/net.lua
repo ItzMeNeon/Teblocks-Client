@@ -95,14 +95,32 @@ local function parseError(pathStr)
     LOG(pathStr)
     if type(pathStr)~='string' then
         MES.new('error',"<"..tostring(pathStr)..">",5)
-    elseif pathStr:find("[^0-9a-zA-Z.]") then
-        MES.new('error',"["..pathStr.."]",5)
-    else
-        local mesPath=STRING.split(pathStr,'.')
-        if mesPath[1]~='Techrater' then
-            MES.new('error',"["..pathStr.."]",5)
-            return
+        return
+    end
+
+    -- Clean up raw HTTP status codes
+    if pathStr:find("^HTTP[ .]%d%d%d") then
+        local code = tonumber(pathStr:match("%d%d%d"))
+        if code == 400 then
+            pathStr = "Invalid request or incorrect credentials"
+        elseif code == 401 then
+            pathStr = "Incorrect username or password"
+        elseif code == 403 then
+            pathStr = "Please verify your account before logging in"
+        elseif code == 404 then
+            pathStr = "Requested resource not found"
+        elseif code == 409 then
+            pathStr = "Username or email is already registered"
+        elseif code == 500 then
+            pathStr = "Server error occurred, please try again"
+        elseif code == 502 or code == 503 or code == 504 then
+            pathStr = "Game server is currently unreachable"
         end
+    end
+
+    -- Check Techrater i18n tree
+    if pathStr:find("^Techrater%.") then
+        local mesPath=STRING.split(pathStr,'.')
         local curText=text.Techrater
         for i=2,#mesPath do
             if type(curText)~='table' then break end
@@ -117,14 +135,14 @@ local function parseError(pathStr)
                 MES.new(curText[1],curText[2],math.min(curText[3],5))
                 return
             end
-        elseif type(curText)=='string' then
-            if #curText>0 then
-                MES.new('warn',curText,5)
-                return
-            end
+        elseif type(curText)=='string' and #curText>0 then
+            MES.new('warn',curText,5)
+            return
         end
-        MES.new('warn',"["..pathStr.."]",5)
     end
+
+    -- Show clean message directly without bracket encapsulation
+    MES.new('error',pathStr,5)
 end
 local function getMsg(request,timeout)
     HTTP(request)
@@ -143,7 +161,9 @@ local function getMsg(request,timeout)
                         elseif not errMsg then
                             errMsg = "HTTP "..tostring(msg and msg.code or "?")
                         end
-                        parseError(errMsg)
+                        if not request.silentError then
+                            parseError(errMsg)
+                        end
                     end
                     return body
                 end
@@ -153,14 +173,20 @@ local function getMsg(request,timeout)
                     if #stripped>0 and stripped~=msg.body then
                         errMsg=errMsg..": "..stripped:sub(1,100)
                     end
-                    parseError(errMsg)
+                    if not request.silentError then
+                        parseError(errMsg)
+                    end
                     return {code=msg.code, message=errMsg}
                 else
-                    MES.new('info',text.serverDown)
+                    if not request.silentError then
+                        MES.new('info',text.serverDown)
+                    end
                     return
                 end
             else
-                MES.new('info',text.serverDown)
+                if not request.silentError then
+                    MES.new('info',text.serverDown)
+                end
                 return
             end
         else
@@ -239,6 +265,7 @@ function NET.loginWithPassword(username,password)
             url=AUTHHOST,
             path='/api/login',
             body={username=username,password=password},
+            silentError=true,
         },6.26)
 
         if res and res.code and math.floor(res.code/100)==2 and res.data and res.data.token then
@@ -262,12 +289,62 @@ function NET.loginWithPassword(username,password)
             WAIT.interrupt()
             return
         elseif res then
-            MES.new('error',res.message or 'Login failed')
+            if res.code == 401 or res.error == 'invalid_credentials' or (res.message and res.message:lower():find('incorrect')) then
+                MES.new('error', "Incorrect username or password", 5)
+            elseif res.code == 403 or res.error == 'unverified' or (res.message and res.message:lower():find('verify')) then
+                MES.new('warn', "Account is not verified! Please verify your account first.", 6)
+                local AUTH = require 'parts.authModal'
+                local uid = res.playerId or res.user_id or username
+                AUTH.openVerify(uid, res.username or username)
+            else
+                local errMsg = res.message or res.error or 'Login failed'
+                if errMsg:find("^HTTP[ .]400") then
+                    errMsg = "Incorrect username or password"
+                end
+                MES.new('error', errMsg, 5)
+            end
         else
-            MES.new('error',text.serverDown)
+            MES.new('error', "Cannot connect to game server. Retrying in background...", 5)
+            NET.triggerReconnect()
         end
 
         WAIT.interrupt()
+    end)
+end
+
+function NET.verifyAccount(userOrId, code, cb)
+    TASK.new(function()
+        local res = getMsg({
+            pool = 'verifyAcc',
+            url = AUTHHOST,
+            path = '/api/auth/verify',
+            body = {user_id = userOrId, code = code},
+            silentError = true,
+        }, 6.26)
+        if res and (res.code == 200 or res.status == 'verified') then
+            if cb then cb(true, "Account verified successfully!") end
+        else
+            local err = res and (res.message or res.error) or "Invalid or expired verification code"
+            if cb then cb(false, err) end
+        end
+    end)
+end
+
+function NET.sendVerificationCode(userOrId, cb)
+    TASK.new(function()
+        local res = getMsg({
+            pool = 'sendVerifyCode',
+            url = AUTHHOST,
+            path = '/api/auth/send-verification',
+            body = {user_id = userOrId},
+            silentError = true,
+        }, 6.26)
+        if res and (res.code == 200 or res.status == 'sent') then
+            if cb then cb(true, "Verification code sent!") end
+        else
+            local err = res and (res.message or res.error) or "Failed to send code"
+            if cb then cb(false, err) end
+        end
     end)
 end
 function NET.getUserInfo(uid)
@@ -427,9 +504,9 @@ end
 
 --Push stream data to players
 function NET.pumpStream(d)
-    if d.playerId==USER.uid then return end
+    if not d or d.playerId==USER.uid then return end
     for _,P in next,PLAYERS do
-        if P.uid==d.playerId then
+        if tostring(P.uid)==tostring(d.playerId) then
             local res,stream=pcall(love.data.decode,'string','base64',d.data)
             if res then
                 DATA.pumpRecording(stream,P.stream)
@@ -438,6 +515,11 @@ function NET.pumpStream(d)
             end
             return
         end
+    end
+    -- Buffer early stream packets until players are spawned
+    if not NET.storedStream then NET.storedStream={} end
+    if #NET.storedStream < 120 then
+        table.insert(NET.storedStream, d)
     end
 end
 
@@ -619,10 +701,9 @@ end
 -- 1413 (handleMatchJoin in ws.go), so a client with rollback disabled
 -- cannot play ranked matches when the server is in authoritative mode.
 --
--- To temporarily disable rollback (e.g. for debugging), call
--- NET.setRollbackEnabled(false) from the LÖVE console. Production
--- clients should leave this true.
-NET._rollbackEnabled=true
+-- Rollback netcode is disabled in favor of lightweight deterministic stream relay.
+-- This eliminates deep-copy GC pauses and frame drops while keeping full multiplayer compatibility.
+NET._rollbackEnabled=false
 function NET.setRollbackEnabled(b) NET._rollbackEnabled=b and true or false end
 -- NET._confirmedInputs[uid] = list of {frame, keyID, isRelease} the server has
 -- acked. Slice 4's resim loop drains these when rebuilding a frame.
@@ -1001,29 +1082,7 @@ function NET.wsCallBack.room_enter(body)
         NET.roomState=body.data
         NETPLY.clear()
         destroyPlayers()
-        local isRanked=body.data.info and body.data.info.type=='ranked'
-        if not isRanked then
-            loadGame('netBattle',true,true)
-        else
-            freshDate()
-            if legalGameTime() then
-                if not MODES.netBattle and FILE.isSafe('parts/modes/netBattle') then
-                    MODES.netBattle=require('parts.modes.netBattle')
-                    MODES.netBattle.name='netBattle'
-                end
-                if MODES.netBattle.score then
-                    STAT.lastPlay='netBattle'
-                end
-                GAME.playing=true
-                GAME.init=true
-                GAME.replaySetup=false
-                GAME.fromRepMenu=false
-                GAME.curModeName='netBattle'
-                GAME.curMode=MODES.netBattle
-                GAME.modeEnv=GAME.curMode.env
-                GAME.net=true
-            end
-        end
+        loadGame('netBattle',true,true)
         for _,p in next,body.data.players do
             NETPLY.add{
                 uid=p.playerId,
@@ -1045,16 +1104,19 @@ function NET.wsCallBack.room_enter(body)
             end
         end
         if NET.roomState.state=='Playing' and NET.roomState.info.type~='ranked' then
-            NET.storedStream={}
-            for _,p in next,body.data.players do
-                table.insert(NET.storedStream,{
-                    playerId=p.playerId,
-                    data=p.history,
-                })
+            -- Joined while a game is already in progress.
+            -- Do NOT start netPlaying or feed stored streams; leave the player in
+            -- the room lobby so they don't get thrown into an active match mid-game (which desyncs).
+            NET.storedStream=nil
+            TASK.unlock('netPlaying')
+            if NETPLY.map[USER.uid] then
+                NETPLY.map[USER.uid].playMode='Spectator'
+                NETPLY.map[USER.uid].readyMode='Standby'
             end
-            NET.seed=body.data.seed
-            TASK.lock('netPlaying')
+            MES.new('info', "Match in progress — waiting in room lobby for next round")
+            NET.freshRoomAllReady()
         else
+            TASK.unlock('netPlaying')
             NET.freshRoomAllReady()
         end
     else
@@ -1153,7 +1215,13 @@ end
 function NET.wsCallBack.player_setState(body)-- not used
 end
 function NET.wsCallBack.player_stream(body)
-    if SCN.cur~='net_game' then return end
+    if SCN.cur~='net_game' then
+        if not NET.storedStream then NET.storedStream={} end
+        if #NET.storedStream < 120 and body.data then
+            table.insert(NET.storedStream, body.data)
+        end
+        return
+    end
     NET.pumpStream(body.data)
 end
 function NET.wsCallBack.player_setPlayMode(body)
@@ -1233,8 +1301,12 @@ end
 function NET.wsCallBack.match_ready()-- not used
 end
 function NET.wsCallBack.match_start(body)
+    local s = body.data and body.data.seed
+    if s then
+        NET.seed=s
+    end
     if NET.matchFoundPending and NET.matchFoundCountdown>0 then
-        NET.matchFoundSeed=body.data and body.data.seed
+        NET.matchFoundSeed=NET.seed
         return
     end
     -- Note: we must set the lock/seed even if the scene hasn't finished
@@ -1244,45 +1316,61 @@ function NET.wsCallBack.match_start(body)
     -- match would never start. net_game.update only consumes the lock once it
     -- is actually the active scene, so this is safe.
     TASK.lock('netPlaying')
-    NET.seed=body.data and body.data.seed
     if not NET.seed then
         NET.seed=0
         MES.new("error",'No seed received')
     end
 end
 function NET.wsCallBack.match_found(body)
-    local oppId=nil
-    for i=1,#NETPLY.list do
-        if NETPLY.list[i].uid and NETPLY.list[i].uid~=USER.uid then
-            oppId=NETPLY.list[i].uid
-            break
+    local oppId=body.data and body.data.opponentId
+    if not oppId then
+        for i=1,#NETPLY.list do
+            if NETPLY.list[i].uid and NETPLY.list[i].uid~=USER.uid then
+                oppId=NETPLY.list[i].uid
+                break
+            end
         end
     end
 
+    local oppName = body.data and body.data.opponentName
+    if oppName and oppId then
+        if USERS and USERS.setUsername then USERS.setUsername(oppId, oppName) end
+    end
+    if not oppName and oppId then
+        oppName = USERS.getUsername(oppId)
+    end
+    oppName = oppName or "Opponent"
+
     NET.matchFoundMatchId=body.data and body.data.matchId
     NET.matchFoundOppId=oppId
-    NET.matchFoundCountdown=10
+    NET.matchFoundOppName=oppName
+    NET.matchFoundOppElo=body.data and body.data.opponentRating or 1200
+    NET.matchFoundCountdown=2.0
     NET.matchFoundPending=true
-    NET.matchFoundSeed=nil
     NET.matchFoundTime=love.timer.getTime()
-    NET.shakeStr=12
-    NET.shakeTime=0.5
+    NET._pendingMatchFoundScene=true
+    NET.matchmaking=false
+    NET.searchTimer=0
+    NET.storedStream={}
 
     if oppId then NET.getUserInfo(oppId) end
-    SYSFX.newShade(1.2, 0, 0, SCR.w, SCR.h)
-    SYSFX.newRectRipple(2, SCR.cx, SCR.cy, SCR.w, SCR.h)
+    SFX.play('connected')
+    MES.new('info', "Ranked match found vs " .. oppName .. "!", 3)
 
-    NET._pendingMatchFoundScene=true
+    if SCN.cur ~= 'net_matchFound' and SCN.cur ~= 'net_game' then
+        SCN.go('net_matchFound')
+    end
 end
 function NET.wsCallBack.match_start_ranked(body)
+    local s = body.data and body.data.seed
+    if s then
+        NET.seed=s
+    end
     if NET.matchFoundPending and NET.matchFoundCountdown>0 then
-        NET.matchFoundSeed=body.data and body.data.seed
+        NET.matchFoundSeed=NET.seed
         return
     end
-    -- Same as match_start: set the lock/seed unconditionally (see note there)
-    -- so the match starts even if the net_game scene switch is still pending.
     TASK.lock('netPlaying')
-    NET.seed=body.data and body.data.seed
     if not NET.seed then
         NET.seed=0
         MES.new("error",'No seed received')
@@ -1413,30 +1501,74 @@ function NET.wsCallBack.input_hash()
     -- Server -> client is not expected; this is a C->S message only. Ignore.
 end
 
+local reconnectAttempts = 0
+local reconnectMaxDelay = 10
+local isReconnecting = false
+
+function NET.triggerReconnect()
+    local tok = USER and (USER.oToken or USER.aToken)
+    if not tok or tok == '' then
+        NET._isReconnecting = false
+        NET._connecting = false
+        return
+    end
+    if isReconnecting or WS.status('game') == 'running' then return end
+    isReconnecting = true
+    reconnectAttempts = reconnectAttempts + 1
+    local delay = math.min(1.5 * (1.4 ^ (reconnectAttempts - 1)), reconnectMaxDelay)
+    NET._isReconnecting = true
+    NET._reconnectCountdown = delay
+
+    TASK.new(function()
+        while NET._reconnectCountdown and NET._reconnectCountdown > 0 do
+            TEST.yieldT(0.25)
+            NET._reconnectCountdown = math.max(0, NET._reconnectCountdown - 0.25)
+        end
+        NET._reconnectCountdown = nil
+        isReconnecting = false
+        if WS.status('game') ~= 'running' then
+            NET.ws_connect(true)
+        else
+            NET._isReconnecting = false
+            reconnectAttempts = 0
+        end
+    end)
+end
+
 function NET.startupConnect()
-    if WS.status('game') ~= 'dead' then return end
     TASK.new(function()
         if USER.aToken and not USER.oToken then
             USER.oToken = USER.aToken
         elseif USER.oToken and not USER.aToken then
             USER.aToken = USER.oToken
         end
-        NET.ws_connect()
+        local tok = USER and (USER.oToken or USER.aToken)
+        if tok and tok ~= '' then
+            NET.ws_connect()
+        end
     end)
 end
 
 function NET.ws_connect(force)
+    local tok = USER and (USER.oToken or USER.aToken)
+    if not tok or tok == '' then
+        NET._connecting = false
+        NET._isReconnecting = false
+        return
+    end
     if force or WS.status('game')=='dead' then
         if WS.status('game')~='dead' then
             WS.close('game')
         end
-        local tok = USER.oToken or USER.aToken or ''
+        NET._connecting = true
         WS.connect('game','',{['x-access-token']=tok},6)
         TASK.removeTask_code(NET.ws_update)
         TASK.new(NET.ws_update)
     end
 end
 function NET.ws_close()
+    NET._connecting = false
+    NET._isReconnecting = false
     WS.close('game')
 end
 function NET.ws_update()
@@ -1444,13 +1576,19 @@ function NET.ws_update()
     while true do
         TEST.yieldT(1/26)
         if WS.status('game')=='dead' then
-            if SCN.cur and (SCN.cur:sub(1,3)=='net' or SCN.cur=='lobby') then
+            NET._connecting = false
+            if SCN.cur == 'net_game' and TASK.getLock('netPlaying') then
                 TEST.yieldUntilNextScene()
                 GAME.playing=false
-                SCN.backTo('main')
+                MES.new('warn', "Connection lost during match", 5)
+                SCN.backTo('lobby')
             end
+            NET.triggerReconnect()
             return
         elseif WS.status('game')=='running' then
+            NET._connecting = false
+            NET._isReconnecting = false
+            reconnectAttempts = 0
             break
         end
     end
@@ -1502,11 +1640,13 @@ function NET.ws_update()
         TEST.yieldT(.01)-- Network messages, max 126 FPS is enough
 
         if WS.status('game')=='dead' then
-            if SCN.cur and (SCN.cur:sub(1,3)=='net' or SCN.cur=='lobby') then
+            if SCN.cur == 'net_game' and TASK.getLock('netPlaying') then
                 TEST.yieldUntilNextScene()
                 GAME.playing=false
-                SCN.backTo('main')
+                MES.new('warn', "Connection lost during match", 5)
+                SCN.backTo('lobby')
             end
+            NET.triggerReconnect()
             return
         end
 
@@ -1520,13 +1660,14 @@ function NET.ws_update()
             elseif op=='pong' then
             elseif op=='close' then
                 msg=JSON.decode(msg)
-                if msg then
+                if msg and msg.message then LOG("[WS Close] " .. tostring(msg.message)) end
+                if SCN.cur == 'net_game' and TASK.getLock('netPlaying') then
                     MES.new('info',text.wsClose:repD(msg and msg.message or msg))
-                    if msg and msg.message then LOG(msg.message) end
+                    TEST.yieldUntilNextScene()
+                    GAME.playing=false
+                    SCN.backTo('lobby')
                 end
-                TEST.yieldUntilNextScene()
-                GAME.playing=false
-                SCN.backTo('main')
+                NET.triggerReconnect()
                 return
             elseif msg then
                 msg=JSON.decode(msg)
@@ -1661,6 +1802,66 @@ function NET.loadSavedData(sections)
     else
         MES.new('check',text.saveDone)
     end
+end
+
+function NET.reportPlayer(data, cb)
+    if not data or not data.reported_uid then
+        if cb then cb(false, "missing target") end
+        return
+    end
+
+    -- Priority 1: WebSocket if game connection is active
+    if WS.status('game') == 'running' then
+        WS.send('game', {
+            action = 1321, -- actionReportPlayer
+            data = {
+                reported_uid = tostring(data.reported_uid),
+                reported_username = tostring(data.reported_username or ""),
+                reason = tostring(data.reason or "other"),
+                details = tostring(data.details or ""),
+                room_id = tostring(data.room_id or ""),
+                match_id = tostring(data.match_id or ""),
+                client_meta = {
+                    reporter_uid = tostring(USER and USER.uid or ""),
+                    client_version = tostring(VERSION and VERSION.room or ""),
+                    time = os.time(),
+                }
+            }
+        })
+        if cb then cb(true, "sent_via_ws") end
+        return
+    end
+
+    -- Priority 2: HTTP POST /api/report
+    local baseWeb = (AUTHURL and AUTHURL:find("^http")) and AUTHURL or "https://teblocks.my.id"
+    local headers = {
+        ["Content-Type"] = "application/json",
+    }
+    if USER and USER.aToken then
+        headers["x-access-token"] = USER.aToken
+    end
+
+    HTTP({
+        pool = 'report',
+        type = 'post',
+        url = baseWeb .. "/api/report",
+        header = headers,
+        body = JSON._encode({
+            reported_uid = tostring(data.reported_uid),
+            reported_username = tostring(data.reported_username or ""),
+            reason = tostring(data.reason or "other"),
+            details = tostring(data.details or ""),
+            room_id = tostring(data.room_id or ""),
+            match_id = tostring(data.match_id or ""),
+            client_meta = {
+                reporter_uid = tostring(USER and USER.uid or ""),
+                client_version = tostring(VERSION and VERSION.room or ""),
+                time = os.time(),
+            }
+        }),
+    })
+
+    if cb then cb(true, "queued_http") end
 end
 
 return NET

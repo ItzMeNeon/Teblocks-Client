@@ -2,6 +2,7 @@ local scene = {}
 
 local AUTH = require 'parts.authModal'
 local REG_CONFIRM = require 'parts.registerConfirmModal'
+local NET_BAR = require 'parts.netTopBar'
 
 --[[
     MAIN SCENE - Clean, Modern Block-Stacking Client UI
@@ -233,7 +234,6 @@ local function getProfileMenuItems()
                 STAT.elo = nil
                 STAT.globalRank = nil
                 NET.ws_close()
-                NET.ws_connect()
                 MES.new('info', "Logged out")
             end
         })
@@ -495,8 +495,7 @@ function scene.resize()
 end
 
 function scene.mouseClick(x, y)
-    if REG_CONFIRM.isOpen() and REG_CONFIRM.mouseClick(x, y) then return true end
-    if AUTH.isOpen() and AUTH.mouseClick(x, y) then return true end
+    if REG_CONFIRM.isOpen() or AUTH.isOpen() then return true end
     return false
 end
 scene.touchClick = scene.mouseClick
@@ -509,12 +508,39 @@ end
 function scene.mouseDown(x, y)
     -- Modal input interactions: forward clicks to active modal and consume event
     if REG_CONFIRM.isOpen() then
+        WIDGET.unFocus(true)
         REG_CONFIRM.mouseClick(x, y)
         return true
     end
     if AUTH.isOpen() then
+        WIDGET.unFocus(true)
         AUTH.mouseClick(x, y)
         return true
+    end
+
+    -- Matchmaking persistent pill cancel / jump click
+    if NET and NET.matchmaking then
+        local qX, qY, qW, qH = 750, 8, 270, 36
+        local cancelX = qX + qW - 18
+        local cancelY = qY + qH * 0.5
+        if (x - cancelX) ^ 2 + (y - cancelY) ^ 2 <= 14 * 14 then
+            NET.matchmaking = false
+            NET.searchTimer = 0
+            NET.matchFoundPending = false
+            NET.matchFoundCountdown = 0
+            NET.matchFoundSeed = nil
+            NET.matchFoundOppId = nil
+            NET.matchFoundMatchId = nil
+            NET._pendingMatchFoundScene = false
+            NET.ranked_leave()
+            SFX.play('click')
+            MES.new('info', "Matchmaking cancelled")
+            return true
+        elseif x >= qX and x <= qX + qW and y >= qY and y <= qY + qH then
+            SCN.go('net_ranked')
+            SFX.play('click')
+            return true
+        end
     end
 
     -- Profile dropdown menu interactions
@@ -981,13 +1007,9 @@ function scene.update(dt)
         L[n].y = TB_ICON_Y
     end
 
-    -- Matchmaking popup fade
-    if NET.matchFoundPending then
-        searchPopupAlpha = math.max(0, searchPopupAlpha - dt * 6)
-    elseif NET.matchmaking then
-        searchPopupAlpha = math.min(1, searchPopupAlpha + dt * 6)
-    else
-        searchPopupAlpha = math.max(0, searchPopupAlpha - dt * 6)
+    -- Matchmaking persistent state & transition
+    if NET and NET.matchmaking then
+        NET.searchTimer = (NET.searchTimer or 0) + dt
     end
 end
 
@@ -1070,6 +1092,53 @@ local function drawTopBar(t)
 
     -- Top-right compact profile pill
     drawProfilePill(t)
+
+    -- Persistent Ranked Matchmaking Pill
+    if NET and NET.matchmaking then
+        local qX, qY, qW, qH = 746, 8, 276, 36
+        local cancelX = qX + qW - 18
+        local cancelY = qY + qH * 0.5
+        local mx, my = getMousePos()
+        local isCancelHov = (mx - cancelX) ^ 2 + (my - cancelY) ^ 2 <= 13 * 13
+        local isPillHov = (mx >= qX and mx <= qX + qW and my >= qY and my <= qY + qH and not isCancelHov)
+
+        local glow = 0.75 + 0.25 * math.sin(t * 4.5)
+        GC.setColor(.08, .12, .24, .92)
+        GC.rectangle('fill', qX, qY, qW, qH, 6)
+
+        GC.setColor(1.0, .75, .20, glow)
+        GC.setLineWidth(isPillHov and 2 or 1.2)
+        GC.rectangle('line', qX, qY, qW, qH, 6)
+
+        local dotGlow = 0.5 + 0.5 * math.sin(t * 6)
+        GC.setColor(1.0, .80, .25, dotGlow)
+        GC.circle('fill', qX + 16, qY + qH * 0.5, 4)
+        GC.setColor(1.0, .80, .25, 0.3 * dotGlow)
+        GC.circle('line', qX + 16, qY + qH * 0.5, 7 + 3 * dotGlow)
+
+        local sec = math.floor(NET.searchTimer or 0)
+        local timeStr = ("%d:%02d"):format(math.floor(sec / 60), sec % 60)
+        GC.setColor(1.0, .88, .40, .95)
+        setFont(12)
+        GC.print("RANKED 1v1", qX + 28, qY + 4)
+        GC.setColor(.80, .90, 1.0, .85)
+        setFont(11)
+        GC.print("Searching • " .. timeStr, qX + 28, qY + 18)
+
+        if isCancelHov then
+            GC.setColor(.85, .20, .25, .95)
+            GC.circle('fill', cancelX, cancelY, 11)
+            GC.setColor(1, 1, 1, 1)
+        else
+            GC.setColor(.40, .15, .20, .70)
+            GC.circle('fill', cancelX, cancelY, 11)
+            GC.setColor(1.0, .55, .55, .85)
+        end
+        GC.setLineWidth(1.5)
+        GC.circle('line', cancelX, cancelY, 11)
+        GC.line(cancelX - 4, cancelY - 4, cancelX + 4, cancelY + 4)
+        GC.line(cancelX + 4, cancelY - 4, cancelX - 4, cancelY + 4)
+    end
 
     -- ── Title Logo & Version (Centered) ──────────────────────
     GC.setColor(1, 1, 1, .95)
@@ -1555,16 +1624,6 @@ function scene.draw()
     drawKeyHints()
     drawTopBar(t)
     drawTip()
-
-    if searchPopupAlpha > .01 then
-        GC.setColor(COLOR.lY[1], COLOR.lY[2], COLOR.lY[3], searchPopupAlpha * .85)
-        FONT.set(18)
-        GC.mStr("Ranked match searching...", 790, 648)
-        if NET.searchTimer then
-            GC.setColor(COLOR.lH[1], COLOR.lH[2], COLOR.lH[3], searchPopupAlpha * .70)
-            GC.mStr(("Elapsed: %.1fs"):format(NET.searchTimer), 790, 668)
-        end
-    end
 end
 
 -- ════════════════════════════════════════════════════════════
@@ -1589,7 +1648,10 @@ function scene.overDraw()
     AUTH.draw()
     REG_CONFIRM.draw()
 
-    -- 5. Screen flash transition
+    -- 5. Bottom-Right Connection Status Indicator
+    NET_BAR.drawBottomStatus()
+
+    -- 6. Screen flash transition
     if flash > 0 then
         GC.replaceTransform(SCR.origin)
         GC.setColor(1, 1, 1, flash)

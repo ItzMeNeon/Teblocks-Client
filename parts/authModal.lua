@@ -16,6 +16,9 @@ local gc_print=gc.print
 
 local username=""
 local password=""
+local verifyCode=""
+local verifyTargetId=""
+local verifyTargetName=""
 local focusedField="username"
 
 local function _close()
@@ -28,6 +31,9 @@ local function _close()
     AUTH.prevActive=nil
     username=""
     password=""
+    verifyCode=""
+    verifyTargetId=""
+    verifyTargetName=""
     focusedField="username"
     love.keyboard.setTextInput(false)
     WIDGET.unFocus(true)
@@ -35,18 +41,34 @@ local function _close()
 end
 
 local function _getFieldRect(fieldName)
-    if fieldName=='username' then
-        return 320,255,640,58
-    elseif fieldName=='password' then
-        return 320,370,640,58
+    if AUTH.mode=='verify' then
+        if fieldName=='verifyCode' then
+            return 320,290,640,58
+        end
+    else
+        if fieldName=='username' then
+            return 320,255,640,58
+        elseif fieldName=='password' then
+            return 320,370,640,58
+        end
     end
 end
 
 local function _getButtonRect(buttonName)
-    if buttonName=='submit' then
-        return 580,455,180,60
-    elseif buttonName=='close' then
-        return 340,455,180,60
+    if AUTH.mode=='verify' then
+        if buttonName=='verify' or buttonName=='submit' then
+            return 760,425,200,55
+        elseif buttonName=='resend' then
+            return 510,425,220,55
+        elseif buttonName=='close' then
+            return 320,425,160,55
+        end
+    else
+        if buttonName=='submit' then
+            return 580,455,180,60
+        elseif buttonName=='close' then
+            return 340,455,180,60
+        end
     end
 end
 
@@ -74,6 +96,7 @@ local function _drawButton(x,y,w,h,label,color)
     local r,g,b=1,1,1
     if color=='lG' then r,g,b=.4,1,.4
     elseif color=='lR' then r,g,b=1,.4,.4
+    elseif color=='lB' then r,g,b=.3,.7,1
     end
 
     gc_setColor(r*.7,g*.7,b*.7,.9)
@@ -82,9 +105,9 @@ local function _drawButton(x,y,w,h,label,color)
     gc_setLineWidth(2)
     gc_rectangle('line',x,y,w,h,6)
 
-    setFont(28)
+    setFont(24)
     gc_setColor(1,1,1)
-    gc_print(label,x+(w-#label*14)/2,y+(h-28)/2)
+    gc_print(label,x+(w-#label*12)/2,y+(h-24)/2)
 end
 
 function AUTH.open(mode)
@@ -94,7 +117,22 @@ function AUTH.open(mode)
     AUTH.widgets={}
     username=""
     password=""
+    verifyCode=""
     focusedField="username"
+    _isOpen=true
+    AUTH.openTimer=0.35
+    love.keyboard.setTextInput(true)
+end
+
+function AUTH.openVerify(uid, uname)
+    if _isOpen then _close() end
+    AUTH.mode='verify'
+    AUTH.prevActive=WIDGET.active
+    AUTH.widgets={}
+    verifyTargetId=tostring(uid or "")
+    verifyTargetName=tostring(uname or uid or "")
+    verifyCode=""
+    focusedField="verifyCode"
     _isOpen=true
     AUTH.openTimer=0.35
     love.keyboard.setTextInput(true)
@@ -107,6 +145,39 @@ function AUTH._submit()
     end
     NET.loginWithPassword(username, password)
     _close()
+end
+
+function AUTH._submitVerify()
+    if #verifyCode==0 then
+        MES.new('error', "Please enter the 6-digit verification code")
+        return
+    end
+    SFX.play('enter')
+    MES.new('info', "Verifying account...")
+    NET.verifyAccount(verifyTargetId, verifyCode, function(ok, msg)
+        if ok then
+            MES.new('check', "Account verified! Please log in.")
+            local savedName = verifyTargetName
+            _close()
+            AUTH.open()
+            username = savedName
+            focusedField = "password"
+        else
+            MES.new('error', msg or "Verification failed")
+        end
+    end)
+end
+
+function AUTH._resendCode()
+    SFX.play('click')
+    MES.new('info', "Requesting verification code...")
+    NET.sendVerificationCode(verifyTargetId, function(ok, msg)
+        if ok then
+            MES.new('info', "Verification code sent! Check console / email.")
+        else
+            MES.new('error', msg or "Failed to send code")
+        end
+    end)
 end
 
 function AUTH.isOpen()
@@ -153,20 +224,39 @@ function AUTH.draw()
         gc_setLineWidth(2)
         gc_rectangle('line',x,y,w,h,10)
 
-        setFont(42)
-        gc_setColor(COLOR.Z[1],COLOR.Z[2],COLOR.Z[3],AUTH.boxAlpha)
-        gc_print('Log In',320,155)
+        if AUTH.mode=='verify' then
+            setFont(38)
+            gc_setColor(COLOR.Z[1],COLOR.Z[2],COLOR.Z[3],AUTH.boxAlpha)
+            gc_print('Verify Account',320,150)
 
-        setFont(22)
-        gc_setColor(.7,.7,.7,AUTH.boxAlpha)
-        gc_print("Username",320,225)
-        _drawInputBox(320,255,640,58,username,false,focusedField=='username')
+            setFont(16)
+            gc_setColor(.8,.85,1,AUTH.boxAlpha)
+            gc_print("Account for "..(verifyTargetName~="" and verifyTargetName or "user").." is not yet verified.",320,205)
 
-        gc_print("Password",320,340)
-        _drawInputBox(320,370,640,58,password,true,focusedField=='password')
+            setFont(16)
+            gc_setColor(.7,.7,.7,AUTH.boxAlpha)
+            gc_print("Enter 6-digit verification code:",320,255)
+            _drawInputBox(320,290,640,58,verifyCode,false,focusedField=='verifyCode')
 
-        _drawButton(580,455,180,60,'Log In','lG')
-        _drawButton(340,455,180,60,'Close','lR')
+            _drawButton(760,425,200,55,'Verify','lG')
+            _drawButton(510,425,220,55,'Resend Code','lB')
+            _drawButton(320,425,160,55,'Close','lR')
+        else
+            setFont(42)
+            gc_setColor(COLOR.Z[1],COLOR.Z[2],COLOR.Z[3],AUTH.boxAlpha)
+            gc_print('Log In',320,155)
+
+            setFont(22)
+            gc_setColor(.7,.7,.7,AUTH.boxAlpha)
+            gc_print("Username",320,225)
+            _drawInputBox(320,255,640,58,username,false,focusedField=='username')
+
+            gc_print("Password",320,340)
+            _drawInputBox(320,370,640,58,password,true,focusedField=='password')
+
+            _drawButton(580,455,180,60,'Log In','lG')
+            _drawButton(340,455,180,60,'Close','lR')
+        end
         gc_pop()
     end
 end
@@ -176,26 +266,53 @@ function AUTH.mouseClick(x,y)
 
     love.keyboard.setTextInput(true)
 
-    local fields={'username','password'}
-    for _,fieldName in ipairs(fields) do
-        local fx,fy,fw,fh=_getFieldRect(fieldName)
+    if AUTH.mode=='verify' then
+        local fx,fy,fw,fh=_getFieldRect('verifyCode')
         if fx and _pointInRect(x,y,fx-6,fy-6,fw+12,fh+12) then
-            focusedField=fieldName
+            focusedField='verifyCode'
             love.keyboard.setTextInput(true)
             return true
         end
-    end
 
-    local submitX,submitY,submitW,submitH=_getButtonRect('submit')
-    if submitX and _pointInRect(x,y,submitX-8,submitY-8,submitW+16,submitH+16) then
-        AUTH._submit()
-        return true
-    end
+        local verX,verY,verW,verH=_getButtonRect('verify')
+        if verX and _pointInRect(x,y,verX-8,verY-8,verW+16,verH+16) then
+            AUTH._submitVerify()
+            return true
+        end
 
-    local closeX,closeY,closeW,closeH=_getButtonRect('close')
-    if closeX and _pointInRect(x,y,closeX-8,closeY-8,closeW+16,closeH+16) then
-        _close()
-        return true
+        local resX,resY,resW,resH=_getButtonRect('resend')
+        if resX and _pointInRect(x,y,resX-8,resY-8,resW+16,resH+16) then
+            AUTH._resendCode()
+            return true
+        end
+
+        local closeX,closeY,closeW,closeH=_getButtonRect('close')
+        if closeX and _pointInRect(x,y,closeX-8,closeY-8,closeW+16,closeH+16) then
+            _close()
+            return true
+        end
+    else
+        local fields={'username','password'}
+        for _,fieldName in ipairs(fields) do
+            local fx,fy,fw,fh=_getFieldRect(fieldName)
+            if fx and _pointInRect(x,y,fx-6,fy-6,fw+12,fh+12) then
+                focusedField=fieldName
+                love.keyboard.setTextInput(true)
+                return true
+            end
+        end
+
+        local submitX,submitY,submitW,submitH=_getButtonRect('submit')
+        if submitX and _pointInRect(x,y,submitX-8,submitY-8,submitW+16,submitH+16) then
+            AUTH._submit()
+            return true
+        end
+
+        local closeX,closeY,closeW,closeH=_getButtonRect('close')
+        if closeX and _pointInRect(x,y,closeX-8,closeY-8,closeW+16,closeH+16) then
+            _close()
+            return true
+        end
     end
 
     local w,h=700,480
@@ -222,19 +339,31 @@ function AUTH.keyDown(key,rep)
         _close()
         return false
     elseif (key=='return' or key=='kpenter') and not rep then
-        AUTH._submit()
+        if AUTH.mode=='verify' then
+            AUTH._submitVerify()
+        else
+            AUTH._submit()
+        end
         return false
     elseif key=='tab' and not rep then
-        local fields={'username','password'}
-        for i,fieldName in ipairs(fields) do
-            if fieldName==focusedField then
-                focusedField=fields[(i%#fields)+1]
-                break
+        if AUTH.mode=='verify' then
+            focusedField='verifyCode'
+        else
+            local fields={'username','password'}
+            for i,fieldName in ipairs(fields) do
+                if fieldName==focusedField then
+                    focusedField=fields[(i%#fields)+1]
+                    break
+                end
             end
         end
         return false
     elseif key=='backspace' then
-        if focusedField=='username' then
+        if AUTH.mode=='verify' then
+            if #verifyCode>0 then
+                verifyCode=verifyCode:sub(1,-2)
+            end
+        elseif focusedField=='username' then
             local t=username
             local p=#t
             while p>0 and t:byte(p)>=128 and t:byte(p)<192 do
@@ -258,7 +387,11 @@ end
 function AUTH.textInput(t)
     if not _isOpen then return nil end
 
-    if focusedField=='username' and #username<64 then
+    if AUTH.mode=='verify' then
+        if #verifyCode<16 then
+            verifyCode=verifyCode..t
+        end
+    elseif focusedField=='username' and #username<64 then
         username=username..t
     elseif focusedField=='password' and #password<64 then
         password=password..t

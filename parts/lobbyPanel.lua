@@ -162,6 +162,26 @@ function LOBBY.mouseClick(x,y)
     if LOBBY.playerList:checkToggleButtonClick(x,y) then return true end
     if LOBBY.chat:checkToggleButtonClick(x,y) then return true end
     
+    if LOBBY.playerList.visible and LOBBY.playerList.alpha>0.5 then
+        if x>=LOBBY.playerList.x+20 and x<=LOBBY.playerList.x+LOBBY.playerList.w-20 and y>=200 and y<=680 then
+            local idx=math.floor((y-200)/28)+1
+            if NET.onlinePlayers and NET.onlinePlayers[idx] then
+                local p=NET.onlinePlayers[idx]
+                if p.id and p.id~=USER.uid then
+                    local REPORT=require'parts.reportModal'
+                    local name=p.username
+                    if not name or #name==0 or name==p.id then
+                        name=USERS.getUsername(p.id)
+                    end
+                    if not name or #name==0 then name=p.id or "Player" end
+                    REPORT.open(p.id, name, "Online Players", "")
+                    SFX.play('click')
+                    return true
+                end
+            end
+        end
+    end
+
     if LOBBY.chat.visible and LOBBY.chat.alpha>0.5 then
         local inputY=670
         if x>=LOBBY.chat.x+10 and x<=LOBBY.chat.x+LOBBY.chat.w-90 and y>=inputY and y<=inputY+35 then

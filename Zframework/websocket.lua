@@ -181,8 +181,11 @@ function WS.update(dt)
                 ws.status='dead'
                 local err=ws.thread:getError()
                 if err then
-                    MES.new('warn',text.wsClose:repD(err:match(":.-:(.-)\n")))
-                    WS.alert(name)
+                    if LOG then LOG("[WS] "..tostring(name).." thread died: "..tostring(err)) end
+                    if not ws.silent and (USER and (USER.oToken or USER.aToken)) and name ~= 'game' then
+                        MES.new('warn',text.wsClose:repD(err:match(":.-:(.-)\n") or err))
+                        WS.alert(name)
+                    end
                 end
             end
         end

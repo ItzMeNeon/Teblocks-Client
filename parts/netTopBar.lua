@@ -41,6 +41,11 @@ function NET_BAR.update(dt)
         f.rot = f.rot + f.rs * dt
         if f.y > 740 then spawnBGFaller(i, false) end
     end
+
+    -- Matchmaking persistent state & transition monitor
+    if NET and NET.matchmaking then
+        NET.searchTimer = (NET.searchTimer or 0) + dt
+    end
 end
 
 function NET_BAR.drawBG()
@@ -64,11 +69,16 @@ local function getMousePos()
     return love.mouse.getPosition()
 end
 
--- Back button coordinates (top left)
+-- Top Bar Component Coordinates
 local BACK_X = 16
 local BACK_Y = 8
 local BACK_W = 120
 local BACK_H = 36
+
+local QUEUE_X = 146
+local QUEUE_Y = 8
+local QUEUE_W = 310
+local QUEUE_H = 36
 
 function NET_BAR.draw(subtitle, backLabel)
     local t = love.timer.getTime()
@@ -111,6 +121,56 @@ function NET_BAR.draw(subtitle, backLabel)
     setFont(14)
     gc.printf(backLabel or "← Back", BACK_X, BACK_Y + 9, BACK_W, 'center')
 
+    -- Persistent Ranked Matchmaking Pill
+    if NET and NET.matchmaking then
+        local qX, qY, qW, qH = QUEUE_X, QUEUE_Y, QUEUE_W, QUEUE_H
+        local cancelX = qX + qW - 20
+        local cancelY = qY + qH * 0.5
+        local isCancelHov = (mx - cancelX) ^ 2 + (my - cancelY) ^ 2 <= 13 * 13
+        local isPillHov = (mx >= qX and mx <= qX + qW and my >= qY and my <= qY + qH and not isCancelHov)
+
+        -- Pulsing border glow
+        local glow = 0.75 + 0.25 * math.sin(t * 4.5)
+        gc_setColor(.08, .12, .24, .92)
+        gc_rectangle('fill', qX, qY, qW, qH, 6)
+
+        gc_setColor(1.0, .75, .20, glow)
+        gc_setLineWidth(isPillHov and 2 or 1.2)
+        gc_rectangle('line', qX, qY, qW, qH, 6)
+
+        -- Pulsing radar indicator
+        local dotGlow = 0.5 + 0.5 * math.sin(t * 6)
+        gc_setColor(1.0, .80, .25, dotGlow)
+        gc_circle('fill', qX + 16, qY + qH * 0.5, 4)
+        gc_setColor(1.0, .80, .25, 0.3 * dotGlow)
+        gc_circle('line', qX + 16, qY + qH * 0.5, 7 + 3 * dotGlow)
+
+        -- Queue status & live timer
+        local sec = math.floor(NET.searchTimer or 0)
+        local timeStr = ("%d:%02d"):format(math.floor(sec / 60), sec % 60)
+        gc_setColor(1.0, .88, .40, .95)
+        setFont(12)
+        gc.print("RANKED 1v1", qX + 28, qY + 4)
+        gc_setColor(.80, .90, 1.0, .85)
+        setFont(11)
+        gc.print("Searching • " .. timeStr, qX + 28, qY + 18)
+
+        -- Circular Cancel Button [✕]
+        if isCancelHov then
+            gc_setColor(.85, .20, .25, .95)
+            gc_circle('fill', cancelX, cancelY, 11)
+            gc_setColor(1, 1, 1, 1)
+        else
+            gc_setColor(.40, .15, .20, .70)
+            gc_circle('fill', cancelX, cancelY, 11)
+            gc_setColor(1.0, .55, .55, .85)
+        end
+        gc_setLineWidth(1.5)
+        gc_circle('line', cancelX, cancelY, 11)
+        gc.line(cancelX - 4, cancelY - 4, cancelX + 4, cancelY + 4)
+        gc.line(cancelX + 4, cancelY - 4, cancelX - 4, cancelY + 4)
+    end
+
     -- Centered Logo & Subtitle
     gc_setColor(1, 1, 1, .95)
     if TEXTURE and TEXTURE.title_color then
@@ -131,21 +191,127 @@ function NET_BAR.draw(subtitle, backLabel)
     gc_setLineWidth(1)
     gc_rectangle('line', pCountX, pCountY, pCountW, pCountH, 6)
 
-    -- Pulsing green online dot
+    -- Pulsing status dot and server connection indicator
     local dotAlpha = 0.6 + 0.4 * math.sin(t * 3)
-    gc_setColor(.2, .9, .4, dotAlpha)
+    local isWsConnected = WS and WS.status('game') == 'running'
+    local onlineNum = tonumber(NET and NET.onlineCount)
+    local countStr
+
+    if isWsConnected then
+        gc_setColor(.2, .9, .4, dotAlpha)
+        countStr = (onlineNum and onlineNum > 0) and (onlineNum .. " Online") or "1 Online"
+    elseif NET and (NET._isReconnecting or NET._reconnectCountdown) then
+        gc_setColor(.95, .75, .2, dotAlpha)
+        countStr = "Reconnecting..."
+    elseif NET and NET._connecting then
+        gc_setColor(.3, .7, 1.0, dotAlpha)
+        countStr = "Connecting..."
+    else
+        gc_setColor(.85, .3, .3, dotAlpha)
+        countStr = "Server Offline"
+    end
     gc_circle('fill', pCountX + 16, pCountY + pCountH * 0.5, 4)
 
-    local countStr = (NET and NET.onlineCount and NET.onlineCount > 0)
-        and (tostring(NET.onlineCount) .. " Online")
-        or "Connecting..."
     gc_setColor(.85, .92, 1, .9)
     setFont(12)
     gc.print(countStr, pCountX + 28, pCountY + 10)
+
+    -- Bottom-Right Connection Status Indicator
+    NET_BAR.drawBottomStatus()
+end
+
+function NET_BAR.drawBottomStatus()
+    local isWsConnected = WS and WS.status('game') == 'running'
+    if isWsConnected then return end
+
+    local isConnecting = NET and NET._connecting
+    local isReconnecting = NET and (NET._isReconnecting or NET._reconnectCountdown)
+    local isWsConnecting = WS and WS.status('game') == 'connecting'
+
+    if not (isConnecting or isReconnecting or isWsConnecting) then
+        return
+    end
+
+    local t = love.timer.getTime()
+    local bw, bh = 248, 34
+    local bx = 1280 - bw - 16
+    local by = 720 - bh - 12
+
+    gc_push('transform')
+    gc_replaceTransform(SCR.xOy)
+
+    -- Dark rounded pill background
+    gc_setColor(.04, .06, .14, .90)
+    gc_rectangle('fill', bx, by, bw, bh, 7)
+
+    -- Pulsing border
+    local borderCol = isReconnecting and {.95, .75, .20, .80} or {.30, .75, 1.0, .80}
+    gc_setColor(borderCol[1], borderCol[2], borderCol[3], borderCol[4])
+    gc_setLineWidth(1.2)
+    gc_rectangle('line', bx, by, bw, bh, 7)
+
+    -- Rotating spinner
+    local cx, cy = bx + 18, by + bh * 0.5
+    local r = 6.5
+    for i = 0, 7 do
+        local a = (i / 8) * math.pi * 2 + t * 6.5
+        local alpha = (i / 8) * 0.85 + 0.15
+        gc_setColor(borderCol[1], borderCol[2], borderCol[3], alpha)
+        gc_circle('fill', cx + math.cos(a) * r, cy + math.sin(a) * r, 1.6)
+    end
+
+    -- Status text
+    local msg
+    if isReconnecting then
+        local cd = NET._reconnectCountdown and math.ceil(NET._reconnectCountdown) or 0
+        msg = cd > 0 and ("Reconnecting in " .. cd .. "s...") or "Reconnecting to server..."
+    else
+        msg = "Connecting to game server..."
+    end
+
+    gc_setColor(.88, .93, 1, .95)
+    setFont(12)
+    gc.print(msg, bx + 32, by + 10)
+
+    gc_pop()
 end
 
 function NET_BAR.checkBackClick(x, y)
     return x >= BACK_X and x <= BACK_X + BACK_W and y >= BACK_Y and y <= BACK_Y + BACK_H
+end
+
+function NET_BAR.mouseDown(x, y)
+    if NET_BAR.checkBackClick(x, y) then
+        return 'back'
+    end
+
+    if NET and NET.matchmaking then
+        local qX, qY, qW, qH = QUEUE_X, QUEUE_Y, QUEUE_W, QUEUE_H
+        local cancelX = qX + qW - 20
+        local cancelY = qY + qH * 0.5
+        if (x - cancelX) ^ 2 + (y - cancelY) ^ 2 <= 14 * 14 then
+            NET.matchmaking = false
+            NET.searchTimer = 0
+            NET.matchFoundPending = false
+            NET.matchFoundCountdown = 0
+            NET.matchFoundSeed = nil
+            NET.matchFoundOppId = nil
+            NET.matchFoundMatchId = nil
+            NET._pendingMatchFoundScene = false
+            NET.ranked_leave()
+            SFX.play('click')
+            MES.new('info', "Matchmaking cancelled")
+            return 'cancel_matchmaking'
+        elseif x >= qX and x <= qX + qW and y >= qY and y <= qY + qH then
+            if SCN.cur ~= 'net_ranked' then
+                SCN.go('net_ranked')
+                SFX.play('click')
+            end
+            return 'open_ranked'
+        end
+    end
+
+    return false
 end
 
 return NET_BAR

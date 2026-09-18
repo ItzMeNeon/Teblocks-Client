@@ -304,15 +304,6 @@ IMG.init{
     },
     electric='media/image/characters/electric.png',
     hbm='media/image/characters/hbm.png',
-
-    lanterns={
-        'media/image/lanterns/1.png',
-        'media/image/lanterns/2.png',
-        'media/image/lanterns/3.png',
-        'media/image/lanterns/4.png',
-        'media/image/lanterns/5.png',
-        'media/image/lanterns/6.png',
-    },
 }
 SKIN.load{
     {name="Neon Cyber (Teblocks)",          path='media/image/skin/teblocks/neon_cyber.png'},

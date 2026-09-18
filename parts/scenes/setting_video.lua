@@ -125,7 +125,7 @@ scene.widgetList={
         hideF=function() return SETTING.bg=='on' end
     },
     WIDGET.newSelector{name='defaultBG', x=680,y=1465,w=200,color='G',
-        list={'space','bg1','bg2','rainbow','rainbow2','aura','rgb','glow','matrix','cubes','tunnel','galaxy','quarks','blockfall','blockrain','blockhole','blockspace'},
+        list={'synthwave','abyss','nexus','supernova','aurora','hyperdrive','cybercity'},
         disp=SETval('defaultBG'),
         code=function(v)
             SETTING.defaultBG=v
@@ -135,11 +135,11 @@ scene.widgetList={
     },
     WIDGET.newKey{name='resetDbg',x=680,y=1540,w=200,h=60,font=20,
         code=function()
-            SETTING.defaultBG='space'
+            SETTING.defaultBG='synthwave'
             scene.widgetList.defaultBG:reset()
             applySettings()
         end,
-        hideF=function() return SETTING.bg~='on' or SETTING.defaultBG=='space' end
+        hideF=function() return SETTING.bg~='on' or SETTING.defaultBG=='synthwave' end
     },
     WIDGET.newKey{name='bg_custom_base64',x=1010,y=1502.5,w=420,h=135,align='M',
         code=function()

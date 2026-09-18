@@ -76,28 +76,28 @@ function THEME.set(theme,keepBGM)
         BG.setDefault(SETTING.defaultBG)
         BGM.setDefault('Lumia')
     elseif theme=='xmas' then
-        BG.setDefault('snow')
+        BG.setDefault('aurora')
         BGM.setDefault('xmas')
         MES.new('info',"==Merry Christmas==")
     elseif theme=='birth' then
-        BG.setDefault('firework')
+        BG.setDefault('supernova')
         BGM.setDefault('magicblock')
     elseif theme=='sprfes' then
-        BG.setDefault('firework')
+        BG.setDefault('supernova')
         BGM.setDefault('spring festival')
         MES.new('info',"★☆新年快乐☆★")
     elseif theme=='halloween' then
-        BG.setDefault('glow')
+        BG.setDefault('abyss')
         BGM.setDefault('antispace')
         MES.new('info',">>Happy halloween<<")
     elseif theme:sub(1,4)=='zday' then
-        BG.setDefault('lanterns')
+        BG.setDefault('nexus')
         BGM.setDefault(({zday1='overzero',zday2='jazz nihilism',zday3='empty'})[theme])
     elseif theme=='fool' then
-        BG.setDefault('blockrain')
+        BG.setDefault('cybercity')
         BGM.setDefault('how feeling')
     elseif theme=='edm' then
-        BG.setDefault('lightning2')
+        BG.setDefault('hyperdrive')
         BGM.setDefault('distortion')
         MES.new('music',"                    红  色  电  音\n                 极  地  大  冲  击\n        只要你敢触电——\n           7月14日、15日 天地人间完全放电\n不用麻醉，一样情不自禁HI起来，飞起来")
     else

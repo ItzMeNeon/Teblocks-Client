@@ -11,52 +11,47 @@ local posLists={
     (function()
         local L={}
         for i=1,5 do
-            L[i]={x=70,y=20+90*i,w=790,h=80}
+            L[i]={x=60,y=120+96*(i-1),w=800,h=82}
         end
         return L
     end)(),
-    -- 6~17
+    -- 6~16
     (function()
         local L={}
-        for i=1,10 do
-            L[i]={x=40,y=60+55*i,w=520,h=50}
+        for i=1,8 do
+            L[i]={x=60,y=120+60*(i-1),w=390,h=52}
         end
-        for i=1,7 do
-            L[10+i]={x=600,y=60+55*i,w=520,h=50}
+        for i=1,8 do
+            L[8+i]={x=470,y=120+60*(i-1),w=390,h=52}
         end
         return L
     end)(),
-    -- 18~31
+    -- 17~32
     (function()
         local L={}
-        for i=1,11 do L[i]=   {x=40,y=65+50*i,w=330,h=45} end
-        for i=1,11 do L[11+i]={x=400,y=65+50*i,w=330,h=45} end
-        for i=1,9 do L[22+i]= {x=760,y=65+50*i,w=330,h=45} end
+        for i=1,11 do L[i]=   {x=58, y=120+46*(i-1),w=254,h=42} end
+        for i=1,11 do L[11+i]={x=328,y=120+46*(i-1),w=254,h=42} end
+        for i=1,10 do L[22+i]={x=598,y=120+46*(i-1),w=254,h=42} end
         return L
     end)(),
-    -- 32~49
+    -- 33~48
     (function()
         local L={}
-        for i=1,10 do L[i]=   {x=30,y=60+50*i,w=200,h=45} end
-        for i=1,10 do L[10+i]={x=240,y=60+50*i,w=200,h=45} end
-        for i=1,10 do L[20+i]={x=450,y=60+50*i,w=200,h=45} end
-        for i=1,10 do L[30+i]={x=660,y=60+50*i,w=200,h=45} end
-        for i=1,9 do L[40+i]= {x=870,y=60+50*i,w=200,h=45} end
+        for i=1,12 do L[i]=   {x=56, y=120+42*(i-1),w=190,h=38} end
+        for i=1,12 do L[12+i]={x=256,y=120+42*(i-1),w=190,h=38} end
+        for i=1,12 do L[24+i]={x=456,y=120+42*(i-1),w=190,h=38} end
+        for i=1,12 do L[36+i]={x=656,y=120+42*(i-1),w=190,h=38} end
         return L
     end)(),
-    -- 50~99
+    -- 49~99
     (function()
         local L={}
-        for i=1,11 do L[i]=   {x=30,y=60+50*i,w=100,h=45} end
-        for i=1,11 do L[i+11]={x=135,y=60+50*i,w=100,h=45} end
-        for i=1,11 do L[i+22]={x=240,y=60+50*i,w=100,h=45} end
-        for i=1,11 do L[i+33]={x=345,y=60+50*i,w=100,h=45} end
-        for i=1,11 do L[i+44]={x=450,y=60+50*i,w=100,h=45} end
-        for i=1,11 do L[i+55]={x=555,y=60+50*i,w=100,h=45} end
-        for i=1,11 do L[i+66]={x=660,y=60+50*i,w=100,h=45} end
-        for i=1,11 do L[i+77]={x=765,y=60+50*i,w=100,h=45} end
-        for i=1,7 do L[i+88]= {x=870,y=60+50*i,w=100,h=45} end
-        for i=1,4 do L[i+95]= {x=975,y=60+50*i,w=100,h=45} end
+        for i=1,12 do L[i]=   {x=56, y=120+42*(i-1),w=126,h=38} end
+        for i=1,12 do L[12+i]={x=190,y=120+42*(i-1),w=126,h=38} end
+        for i=1,12 do L[24+i]={x=324,y=120+42*(i-1),w=126,h=38} end
+        for i=1,12 do L[36+i]={x=458,y=120+42*(i-1),w=126,h=38} end
+        for i=1,12 do L[48+i]={x=592,y=120+42*(i-1),w=126,h=38} end
+        for i=1,12 do L[60+i]={x=726,y=120+42*(i-1),w=126,h=38} end
         return L
     end)(),
 }
@@ -162,6 +157,16 @@ function NETPLY.mouseMove(x,y)
             break
         end
     end
+end
+
+function NETPLY.getPlayerAt(x,y)
+    for i=1,#PLYlist do
+        local p=PLYlist[i]
+        if x>p.x and y>p.y and x<p.x+p.w and y<p.y+p.h then
+            return p
+        end
+    end
+    return nil
 end
 
 function NETPLY.update(dt)

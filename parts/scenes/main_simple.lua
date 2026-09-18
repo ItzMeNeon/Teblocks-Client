@@ -115,6 +115,7 @@ end
 
 function scene.mouseDown(x, y)
     if AUTH.isOpen() then
+        WIDGET.unFocus(true)
         AUTH.mouseClick(x, y)
         return true
     end
@@ -122,7 +123,8 @@ end
 scene.touchDown = scene.mouseDown
 
 function scene.mouseClick(x, y)
-    if AUTH.isOpen() and AUTH.mouseClick(x, y) then return true end
+    if AUTH.isOpen() then return true end
+    return false
 end
 scene.touchClick = scene.mouseClick
 

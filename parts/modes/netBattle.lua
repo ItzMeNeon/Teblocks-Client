@@ -8,7 +8,7 @@ local function marginTask(P)
 end
 return {
     env={
-        bg={'bg1','bg2','blockhole','blockfall','blockrain','blockspace','cubes','fan','flink','glow','matrix','rainbow','rainbow2','tunnel'},
+        bg={'synthwave','abyss','nexus','supernova','aurora','hyperdrive','cybercity'},
         bgm={'battle','beat5th','cruelty','distortion','echo','far','final','here','hope','memory','moonbeam','push','rectification','secret7th remix','secret7th','secret8th remix','secret8th','shift','shining terminal','storm','super7th','there','truth','vapor','waterfall'},
     },
     load=function()
@@ -31,8 +31,9 @@ return {
 
         local N=1
         for i,p in next,L do
-            if p.uid==USER.uid then
-                if p.playMode=='Gamer' then
+            if tostring(p.uid)==tostring(USER.uid) then
+                local mode = tostring(p.playMode or 'Gamer'):lower()
+                if mode=='gamer' then
                     PLY.newPlayer(1,false,p)
                     N=2
                 end
@@ -42,7 +43,8 @@ return {
         end
     -- Iterate NETPLY for real players only.
     for _,p in next,L do
-        if p.playMode=='Gamer' then
+        local mode = tostring(p.playMode or 'Gamer'):lower()
+        if mode=='gamer' then
             PLY.newRemotePlayer(N,false,p)
             N=N+1
         end

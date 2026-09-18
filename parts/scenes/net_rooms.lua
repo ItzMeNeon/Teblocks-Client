@@ -178,9 +178,6 @@ local function _enterSelectedRoom()
     end
 end
 
-local popupY = 720
-local popupTargetY = 720
-
 function scene.enter()
     CARD.reset()
     CARD.enter()
@@ -237,10 +234,13 @@ function scene.mouseDown(x, y)
     if CARD.mouseClick(x, y) then return true end
     if LOBBY.mouseClick(x, y) then return true end
 
-    -- Top bar back button
-    if NET_BAR.checkBackClick(x, y) then
+    -- Top bar (Back button + persistent matchmaking pill)
+    local barAct = NET_BAR.mouseDown(x, y)
+    if barAct == 'back' then
         SFX.play('back')
         SCN.backTo('lobby')
+        return true
+    elseif barAct then
         return true
     end
 
@@ -287,27 +287,8 @@ function scene.mouseDown(x, y)
         SCN.backTo('lobby')
         return true
     end
-
-    -- Matchmaking cancel popup button
-    if NET.matchmaking and popupY < 700 then
-        local pw, ph = 380, 72
-        local px = 640 - pw / 2
-        local py = popupY
-        local cancelX = px + pw - 28
-        local cancelY = py + 22
-        if (x - cancelX) ^ 2 + (y - cancelY) ^ 2 <= 16 * 16 then
-            NET.matchmaking = false
-            NET.searchTimer = 0
-            NET.ranked_leave()
-            popupTargetY = 720
-            SFX.play('click')
-            return true
-        end
-    end
 end
 scene.touchDown = scene.mouseDown
-scene.mouseClick = scene.mouseDown
-scene.touchClick = scene.mouseDown
 
 function scene.update(dt)
     CARD.update(dt)
@@ -321,15 +302,6 @@ function scene.update(dt)
             _fetchRoom()
         end
     end
-
-    if NET.matchFoundPending then
-        popupTargetY = -100
-    elseif NET.matchmaking then
-        popupTargetY = 620
-    else
-        popupTargetY = 720
-    end
-    popupY = MATH.expApproach(popupY, popupTargetY, dt * 12)
 end
 
 function scene.draw()
@@ -551,38 +523,6 @@ function scene.overDraw()
     LOBBY.drawToggleButtons()
     CARD.draw()
     AUTH.draw()
-
-    if popupY < 700 then
-        local alpha = math.min(1, math.max(0, (720 - popupY) / 80))
-        local pw, ph = 380, 72
-        local px = 640 - pw / 2
-        local py = popupY
-
-        gc_setColor(.06, .09, .20, .95 * alpha)
-        gc_rectangle('fill', px, py, pw, ph, 8)
-        gc_setColor(.95, .75, .25, .85 * alpha)
-        gc_setLineWidth(1.5)
-        gc_rectangle('line', px, py, pw, ph, 8)
-
-        setFont(16)
-        gc_setColor(1.0, .85, .30, alpha)
-        gc.printf("Ranked Match Searching...", px, py + 12, pw, 'center')
-
-        if NET.searchTimer then
-            gc_setColor(.75, .85, 1.0, .9 * alpha)
-            setFont(13)
-            gc.printf(("Elapsed Time: %.1fs"):format(NET.searchTimer), px, py + 38, pw, 'center')
-        end
-
-        local cancelX = px + pw - 28
-        local cancelY = py + 22
-        gc_setLineWidth(2)
-        gc_setColor(1, .3, .4, .8 * alpha)
-        gc_circle('line', cancelX, cancelY, 14)
-        gc_setLineWidth(2.5)
-        gc.line(cancelX - 5, cancelY - 5, cancelX + 5, cancelY + 5)
-        gc.line(cancelX + 5, cancelY - 5, cancelX - 5, cancelY + 5)
-    end
 end
 
 scene.widgetList = {
