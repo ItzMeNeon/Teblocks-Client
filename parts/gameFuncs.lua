@@ -600,10 +600,17 @@ function loadGame(mode,ifQuickPlay,ifNet)-- Load a mode and go to game scene
         GAME.curModeName=mode
         GAME.curMode=MODES[mode]
         GAME.modeEnv=GAME.curMode.env
-        GAME.net=ifNet
         if ifNet then
-            SCN.go('net_game','swipeD')
+            GAME.net=true
+            if ifNet == 'ranked' then
+                SCN.go('net_rankedGame','fade_togame')
+            elseif ifNet == 'none' then
+                -- Silent mode initialization: do not auto-navigate, caller manages scene transition
+            else
+                SCN.go('net_game','swipeD')
+            end
         else
+            GAME.net=false
             local modeText=text.modes[mode] or{"["..MODES[mode].name.."]",""}
             TEXTOBJ.modeName:set(modeText[1].."   "..modeText[2])
             SCN.go('game',ifQuickPlay and 'swipeD' or 'fade_togame')
@@ -713,8 +720,8 @@ do-- function freshPlayerPosition(sudden)
             -- mirrored around the screen centre so neither player is favourably
             -- centred/up-scaled while the other is shrunk to a side mini.
             [2]={
-                main={170,110,.8},
-                {630,110,.8},
+                main={170,155,.8},
+                {630,155,.8},
             },
             [3]={main={340,75,1},
                 {25,210,.5},

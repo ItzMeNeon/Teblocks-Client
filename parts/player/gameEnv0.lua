@@ -66,10 +66,19 @@ return {
     -- Some Events are registered in player/init.lua, see "tableNeedMerge"
     extraEvent={
         {'attack',5},
+        {'garbageRise',3},
     },
     extraEventHandler={
         attack=function(P,source,...)
             P:beAttacked(source,...)
+        end,
+        garbageRise=function(P,source,color,amount,line)
+            if P.type=='remote' and P.garbageRise then
+                P:garbageRise(color,amount,line)
+                if P.atkBufferSum then
+                    P.atkBufferSum=math.max(0,P.atkBufferSum-amount)
+                end
+            end
         end,
     },
 

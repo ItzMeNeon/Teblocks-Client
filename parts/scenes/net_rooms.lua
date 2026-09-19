@@ -4,6 +4,7 @@ local CARD = require 'parts.userCard'
 local AUTH = require 'parts.authModal'
 local LOBBY = require 'parts.lobbyPanel'
 local NET_BAR = require 'parts.netTopBar'
+local REPORT = require 'parts.reportModal'
 
 local gc = love.graphics
 local gc_setColor, gc_setLineWidth = gc.setColor, gc.setLineWidth
@@ -194,6 +195,7 @@ function scene.leave()
 end
 
 function scene.keyDown(key, rep)
+    if REPORT.isOpen() then return REPORT.keyDown(key, rep) end
     if AUTH.isOpen() then return AUTH.keyDown(key, rep) end
     if LOBBY.keyDown(key) then return true end
     if TASK.getLock('enterRoom') then return true end
@@ -222,11 +224,16 @@ function scene.keyDown(key, rep)
 end
 
 function scene.textInput(t)
+    if REPORT.isOpen() and REPORT.textInput(t) then return true end
     if AUTH.isOpen() and AUTH.textInput(t) then return true end
     if LOBBY.textInput(t) then return true end
 end
 
 function scene.mouseDown(x, y)
+    if REPORT.isOpen() then
+        if REPORT.mouseClick(x, y) then return true end
+        return true
+    end
     if AUTH.isOpen() then
         if AUTH.mouseClick(x, y) then return true end
         return true
@@ -295,6 +302,7 @@ function scene.update(dt)
     AUTH.update(dt)
     LOBBY.update(dt)
     NET_BAR.update(dt)
+    REPORT.update(dt)
 
     if not TASK.getLock('fetchRoom') then
         fetchTimer = fetchTimer - dt
@@ -523,6 +531,7 @@ function scene.overDraw()
     LOBBY.drawToggleButtons()
     CARD.draw()
     AUTH.draw()
+    REPORT.draw()
 end
 
 scene.widgetList = {

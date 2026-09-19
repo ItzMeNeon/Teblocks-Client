@@ -186,26 +186,28 @@ function Player:createSplashFX(h)
     end
 end
 function Player:createBeam(R,send)
-    if self.gameEnv.atkFX then
-        local power=self.gameEnv.atkFX
+    local power = (self.gameEnv and self.gameEnv.atkFX) or (R and R.gameEnv and R.gameEnv.atkFX) or (SETTING and SETTING.atkFX) or 2
+    if power and power~=false and power>0 then
         local C=self.cur
         local x1,y1,x2,y2
         if not C or self.miniMode then
-            x1,y1=self.centerX,self.centerY
+            x1,y1=self.centerX or (self.x+150*(self.size or 1)),self.centerY or (self.y+300*(self.size or 1))
         else
-            local sc=C.RS.centerPos[C.id][C.dir]
-            x1=self.x+(30*(self.curX+sc[2])-30+15+150)*self.size
-            y1=self.y+(600-30*(self.curY+sc[1])+15+self.fieldUp+self.fieldBeneath)*self.size
+            local sc=(C.RS and C.RS.centerPos and C.RS.centerPos[C.id] and C.RS.centerPos[C.id][C.dir]) or {0,0}
+            x1=self.x+(30*(self.curX+sc[2])-30+15+150)*(self.size or 1)
+            y1=self.y+(600-30*(self.curY+sc[1])+15+self.fieldUp+self.fieldBeneath)*(self.size or 1)
         end
-        if R.miniMode then x2,y2=R.centerX,R.centerY
-        else x2,y2=R.x+308*R.size,R.y+450*R.size
+        if R.miniMode then
+            x2,y2=R.centerX or (R.x+150*(R.size or 1)),R.centerY or (R.y+300*(R.size or 1))
+        else
+            x2,y2=(R.x or 0)+308*(R.size or 1),(R.y or 0)+450*(R.size or 1)
         end
 
-        local c=BLOCK_COLORS[C and C.color or 1]
-        local r,g,b=c[1]*2,c[2]*2,c[3]*2
+        local c=BLOCK_COLORS[C and C.color or 1] or {1,1,1}
+        local r,g,b=(c[1] or 1)*2,(c[2] or 1)*2,(c[3] or 1)*2
         local a=(power+2)*.0626
         if self.type~='human' and R.type~='human' then a=a*.2 end
-        SYSFX.newAttack(1-power*.1,x1,y1,x2,y2,floor(send^.7*(4+power)),r,g,b,a)
+        SYSFX.newAttack(1-power*.1,x1,y1,x2,y2,floor(((send or 1)^.7)*(4+power)),r,g,b,a)
     end
 end
 --------------------------</FX>--------------------------
@@ -779,7 +781,9 @@ function Player:extraEvent(eventName,...)
             if p.type=='human' then
                 SELF=p
             end
-            self.gameEnv.extraEventHandler[eventName](p,self,...)
+            if eventName~='garbageRise' then
+                self.gameEnv.extraEventHandler[eventName](p,self,...)
+            end
         end
     end
 
@@ -811,11 +815,15 @@ function Player:getHolePos()-- Get a good garbage-line hole position
     end
 end
 function Player:garbageRelease()-- Check garbage buffer and try to release them
+    if self.type=='remote' then return end
     local n=1
     while true do
         local A=self.atkBuffer[n]
         if A and A.countdown<=0 and not A.sent then
             self:garbageRise(19+A.lv,A.amount,A.line)
+            if GAME.net and not GAME.replaying then
+                self:extraEvent('garbageRise',19+A.lv,A.amount,A.line)
+            end
             self.atkBufferSum=self.atkBufferSum-A.amount
             A.sent,A.time=true,0
             self.stat.pend=self.stat.pend+A.amount
@@ -957,28 +965,10 @@ function Player:attack(R,send,time,line)
     -- target is another player (not just when typed 'remote'), so the sender
     -- always gets outgoing-attack feedback regardless of how the opponent
     -- player object is typed.
-    if GAME.net and R~=self then
+    if R~=self then
         self:createBeam(R,send)
-        -- Apply the attack to the target's board locally. The opponent's input
-        -- stream only carries key presses, not the garbage itself, so without
-        -- this the attacker's view of the opponent's board would never show the
-        -- incoming lines/garbage (while the opponent, applying it on their own
-        -- machine, does see it) — and the two clients would desync. Applying it
-        -- here keeps the attacker's reconstruction in sync and renders the
-        -- outgoing trash where it belongs: on the opponent's board.
-        -- Only mirror locally when the target is a remote player. For a local
-        -- (non-remote) target, extraEvent already delivered the attack via
-        -- beAttacked above, so applying it again here would send the trash
-        -- twice.
-        --
-        -- EXCEPT in ranked rooms: there the opponent is driven entirely by
-        -- server 1410 snapshots (see snapshot.applyServerState). Mirroring the
-        -- attack locally would double-apply garbage once the snapshot arrives
-        -- (the server has already applied it authoritatively), so we skip the
-        -- local mirror and let the snapshot deliver the garbage.
-        local isRanked=NET.roomState and NET.roomState.info and NET.roomState.info.type=='ranked'
-        if R.type=='remote' and not isRanked then
-            R:receive(self,send,time,line)
+        if R.type=='remote' then
+            R.atkBufferSum=(R.atkBufferSum or 0)+send
         end
     end
 end
@@ -987,31 +977,38 @@ function Player:beAttacked(source,target_sid,send,time,line,seenCount)
     if self==source or self.sid~=target_sid then return end
 
     seenCount = tonumber(seenCount) or 0
+    send = tonumber(send) or 1
+    time = tonumber(time) or 0
+    line = tonumber(line) or 0
 
+    local srcSid = (source and source.sid) or 0
     if not self.inTransitAttacks then
         self.inTransitAttacks={}
     end
-    if not self.inTransitAttacks[source.sid] then
-        self.inTransitAttacks[source.sid]={seenAttacks=0}
+    if not self.inTransitAttacks[srcSid] then
+        self.inTransitAttacks[srcSid]={seenAttacks=0}
     end
     -- Increment the number of seen attacks from that player.
-    self.inTransitAttacks[source.sid].seenAttacks=self.inTransitAttacks[source.sid].seenAttacks + 1
+    self.inTransitAttacks[srcSid].seenAttacks=self.inTransitAttacks[srcSid].seenAttacks + 1
     -- Block against any in-transit attacks before recieving (this prevents passhtrough)
-    for i=seenCount+1,#self.inTransitAttacks[source.sid] do
-        local atk=self.inTransitAttacks[source.sid][i]
-        if atk then
+    for i=seenCount+1,#self.inTransitAttacks[srcSid] do
+        local atk=self.inTransitAttacks[srcSid][i]
+        if atk and atk.send then
             local cancel=MATH.min(atk.send, send)
             atk.send=atk.send-cancel
             send=send-cancel
+            if source and source.atkBufferSum then
+                source.atkBufferSum=math.max(0,source.atkBufferSum-cancel)
+            end
         end
     end
 
-    self:receive(source,send,time,line)
-    -- Draw the incoming attack beam based on the *receiver's* Attack-FX
-    -- preference (not the attacker's), so you always see incoming attacks
-    -- when you have the effect enabled, and fall back gracefully when the
-    -- attacker has no current piece to anchor the beam to.
-    if self.gameEnv.atkFX then source:createBeam(self,send) end
+    if send > 0 then
+        self:receive(source,send,time,line)
+    end
+    if source and source.createBeam then
+        source:createBeam(self,send)
+    end
 end
 function Player:receive(A,send,time,line)
     self.lastRecv=A
@@ -1162,7 +1159,7 @@ function Player:freshNewBlock()
     self:freshBlockDelay(true)
 end
 function Player:lock()
-    if self==PLAYERS[1] and SCN and SCN.cur=='net_game' then
+    if self==PLAYERS[1] and SCN and (SCN.cur=='net_game' or SCN.cur=='net_rankedGame') then
         if not AC then pcall(function() AC=require'parts.anticheatClient' end) end
         if AC and AC.onPieceLock then AC.onPieceLock() end
     end
@@ -2948,38 +2945,46 @@ local function update_streaming(P)
         elseif event<=128 then-- Extra Event
             local eventName=P.gameEnv.extraEvent[event-64][1]
             local eventParamCount=P.gameEnv.extraEvent[event-64][2]
-            local sourceSid=P.stream[P.streamProgress+2]
+            local rawSourceSid=P.stream[P.streamProgress+2]
             local paramBase=P.streamProgress+3
             P.streamProgress=P.streamProgress+eventParamCount+1
 
-            if P.sid==sourceSid and (P.type=='remote' or GAME.replaying) then
+            if P.type=='remote' or GAME.replaying or P.sid==rawSourceSid then
                 _prof.streamExtraEvents=_prof.streamExtraEvents+1
-                local SRC
-                for _,p in next,PLAYERS do
-                    if p.sid==sourceSid then
-                        SRC=p
-                        break
-                    end
-                end
-                local subject=P
+                local SRC = P
                 if eventName=='attack' then
-                    local targetSid=P.stream[paramBase]
-                    for _,p in next,PLAYERS do
-                        if p.sid==targetSid then
-                            subject=p
-                            break
+                    local target = nil
+                    if #PLAYERS==2 then
+                        -- In 1v1 duel, attack from P always targets the other player!
+                        for _,p in next,PLAYERS do
+                            if p~=P then target=p break end
+                        end
+                    else
+                        local rawTargetSid=P.stream[paramBase]
+                        for _,p in next,PLAYERS do
+                            if p.sid==rawTargetSid then
+                                target=p
+                                break
+                            end
+                        end
+                        if not target then
+                            for _,p in next,PLAYERS do
+                                if p~=P then target=p break end
+                            end
                         end
                     end
-                    if SRC and subject then
-                        subject.gameEnv.extraEventHandler['attack'](subject,SRC,
-                            targetSid,
+
+                    if SRC and target and target.gameEnv and target.gameEnv.extraEventHandler and target.gameEnv.extraEventHandler['attack'] then
+                        target.gameEnv.extraEventHandler['attack'](target,SRC,
+                            target.sid,
                             P.stream[paramBase+1],
                             P.stream[paramBase+2],
                             P.stream[paramBase+3],
                             P.stream[paramBase+4])
                     end
                 else
-                    if SRC and subject then
+                    local subject = P
+                    if SRC and subject and subject.gameEnv and subject.gameEnv.extraEventHandler and subject.gameEnv.extraEventHandler[eventName] then
                         local p1,p2,p3,p4,p5=P.stream[paramBase],P.stream[paramBase+1],P.stream[paramBase+2],P.stream[paramBase+3],P.stream[paramBase+4]
                         if eventParamCount==0 then
                             subject.gameEnv.extraEventHandler[eventName](subject,SRC)

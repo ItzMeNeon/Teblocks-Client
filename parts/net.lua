@@ -466,6 +466,7 @@ local actMap={
     match_finish_ranked=     1404,
     match_cancel=            1405,
     match_uploadReplay=      1406,
+    round_finish=            1407,
     -- Server-authoritative sim + rollback (plan Component 2/3)
     auth_snapshot=           1410, -- S->C: authoritative world snapshot
     input_ack=               1411, -- S->C: ack of last received input frame
@@ -491,12 +492,16 @@ end
 
 --Remove player when leave
 local function _playerLeaveRoom(uid)
-    if SCN.cur~='net_game' then return end
+    if SCN.cur~='net_game' and SCN.cur~='net_rankedGame' then return end
     for i=1,#PLAYERS do if PLAYERS[i].uid==uid then table.remove(PLAYERS,i) break end end
     for i=1,#PLY_ALIVE do if PLY_ALIVE[i].uid==uid then table.remove(PLY_ALIVE,i) break end end
     if uid==USER.uid then
         GAME.playing=false
-        SCN.backTo('lobby')
+        if SCN.cur=='net_rankedGame' then
+            SCN.go('net_ranked')
+        else
+            SCN.backTo('lobby')
+        end
     else
         NETPLY.remove(uid)
     end
@@ -1082,7 +1087,8 @@ function NET.wsCallBack.room_enter(body)
         NET.roomState=body.data
         NETPLY.clear()
         destroyPlayers()
-        loadGame('netBattle',true,true)
+        local isRanked = (body.data.info and body.data.info.type == 'ranked') or NET.matchFoundPending
+        loadGame('netBattle',true,isRanked and 'none' or true)
         for _,p in next,body.data.players do
             NETPLY.add{
                 uid=p.playerId,
@@ -1186,13 +1192,13 @@ function NET.wsCallBack.room_remove()
     _playerLeaveRoom(USER.uid)
 end
 function NET.wsCallBack.player_updateConf(body)
-    if SCN.cur~='net_game' then return end
+    if SCN.cur~='net_game' and SCN.cur~='net_rankedGame' then return end
     if type(body.data)=='table' then
         NETPLY.map[body.data.playerId].config=body.data.config
     end
 end
 function NET.wsCallBack.player_finish(body)
-    if SCN.cur~='net_game' then return end
+    if SCN.cur~='net_game' and SCN.cur~='net_rankedGame' then return end
     for _,P in next,PLY_ALIVE do
         if P.uid==body.data.playerId then
             NETPLY.setPlace(P.uid,#PLY_ALIVE)
@@ -1215,7 +1221,7 @@ end
 function NET.wsCallBack.player_setState(body)-- not used
 end
 function NET.wsCallBack.player_stream(body)
-    if SCN.cur~='net_game' then
+    if SCN.cur~='net_game' and SCN.cur~='net_rankedGame' then
         if not NET.storedStream then NET.storedStream={} end
         if #NET.storedStream < 120 and body.data then
             table.insert(NET.storedStream, body.data)
@@ -1345,7 +1351,7 @@ function NET.wsCallBack.match_found(body)
     NET.matchFoundOppId=oppId
     NET.matchFoundOppName=oppName
     NET.matchFoundOppElo=body.data and body.data.opponentRating or 1200
-    NET.matchFoundCountdown=2.0
+    NET.matchFoundCountdown=10.0
     NET.matchFoundPending=true
     NET.matchFoundTime=love.timer.getTime()
     NET._pendingMatchFoundScene=true
@@ -1357,8 +1363,13 @@ function NET.wsCallBack.match_found(body)
     SFX.play('connected')
     MES.new('info', "Ranked match found vs " .. oppName .. "!", 3)
 
-    if SCN.cur ~= 'net_matchFound' and SCN.cur ~= 'net_game' then
+    if SCN.cur ~= 'net_matchFound' and SCN.cur ~= 'net_game' and SCN.cur ~= 'net_rankedGame' then
         SCN.go('net_matchFound')
+    end
+end
+function NET.wsCallBack.round_finish(body)
+    if SCN.cur == 'net_rankedGame' and SCN.scenes.net_rankedGame and SCN.scenes.net_rankedGame.onRoundFinish then
+        SCN.scenes.net_rankedGame.onRoundFinish(body.data)
     end
 end
 function NET.wsCallBack.match_start_ranked(body)
@@ -1375,9 +1386,12 @@ function NET.wsCallBack.match_start_ranked(body)
         NET.seed=0
         MES.new("error",'No seed received')
     end
+    if SCN.cur == 'net_rankedGame' and SCN.scenes.net_rankedGame and SCN.scenes.net_rankedGame.onNextRound then
+        SCN.scenes.net_rankedGame.onNextRound(body.data)
+    end
 end
 function NET.wsCallBack.match_finish_ranked(body)
-    if SCN.cur~='net_game' then return end
+    if SCN.cur~='net_game' and SCN.cur~='net_rankedGame' then return end
     for _,P in next,PLAYERS do
         NETPLY.setStat(P.uid,P.stat)
     end
@@ -1406,6 +1420,9 @@ function NET.wsCallBack.match_finish_ranked(body)
             winnerId=type(d.winnerId)=='string' and d.winnerId or USER.uid,
             myOld=myOld, myNew=myNew, myDelta=myDelta, myRank=STAT.globalRank,
             oppId=oppId, oppOld=oppOld, oppNew=oppNew, oppDelta=oppDelta, oppRank=type(opp.globalRank)=='number' and opp.globalRank or 0,
+            myScore=type(d.myScore)=='number' and d.myScore or 0,
+            oppScore=type(d.oppScore)=='number' and d.oppScore or 0,
+            targetWins=type(d.targetWins)=='number' and d.targetWins or 3,
         }
 
         -- Best-effort: upload this player's replay into the match folder.
@@ -1423,14 +1440,11 @@ function NET.wsCallBack.match_finish_ranked(body)
         })
     end
     -- Let the finish animation (e.g. the opponent's top-out) play out before
-    -- showing results. Keep netPlaying locked so net_game does not briefly drop
-    -- to the waiting room, and only then transition. net_game.leave() will
-    -- unlock netPlaying when the results scene takes over.
-    -- Disband the live room on finish so the client isn't left sitting in a
-    -- stale room that blocks starting a new ranked search.
+    -- showing results. Keep netPlaying locked so the game scene does not briefly drop
+    -- to the waiting room, and only then transition.
     TASK.new(function()
         TEST.yieldT(2.6)
-        if SCN.cur=='net_game' then
+        if SCN.cur=='net_game' or SCN.cur=='net_rankedGame' then
             NET.roomState=nil
             NETPLY.clear()
             NET.matchmaking=false
@@ -1453,11 +1467,11 @@ function NET.wsCallBack.match_cancel()
     NET.matchFoundOppId=nil
     NET.matchFoundMatchId=nil
     NET._pendingMatchFoundScene=false
-    if SCN.cur~='net_ranked' and SCN.cur~='net_matchFound' then return end
+    if SCN.cur~='net_ranked' and SCN.cur~='net_matchFound' and SCN.cur~='net_rankedGame' then return end
     NET.matchmaking=false
     NET.searchTimer=0
     MES.new('info',"Matchmaking cancelled")
-    if SCN.cur=='net_matchFound' then
+    if SCN.cur=='net_matchFound' or SCN.cur=='net_rankedGame' then
         SCN.go('net_ranked')
     end
 end
@@ -1577,11 +1591,15 @@ function NET.ws_update()
         TEST.yieldT(1/26)
         if WS.status('game')=='dead' then
             NET._connecting = false
-            if SCN.cur == 'net_game' and TASK.getLock('netPlaying') then
+            if (SCN.cur == 'net_game' or SCN.cur == 'net_rankedGame') and TASK.getLock('netPlaying') then
                 TEST.yieldUntilNextScene()
                 GAME.playing=false
                 MES.new('warn', "Connection lost during match", 5)
-                SCN.backTo('lobby')
+                if SCN.cur == 'net_rankedGame' then
+                    SCN.go('net_ranked')
+                else
+                    SCN.backTo('lobby')
+                end
             end
             NET.triggerReconnect()
             return
@@ -1640,11 +1658,15 @@ function NET.ws_update()
         TEST.yieldT(.01)-- Network messages, max 126 FPS is enough
 
         if WS.status('game')=='dead' then
-            if SCN.cur == 'net_game' and TASK.getLock('netPlaying') then
+            if (SCN.cur == 'net_game' or SCN.cur == 'net_rankedGame') and TASK.getLock('netPlaying') then
                 TEST.yieldUntilNextScene()
                 GAME.playing=false
                 MES.new('warn', "Connection lost during match", 5)
-                SCN.backTo('lobby')
+                if SCN.cur == 'net_rankedGame' then
+                    SCN.go('net_ranked')
+                else
+                    SCN.backTo('lobby')
+                end
             end
             NET.triggerReconnect()
             return
@@ -1661,11 +1683,15 @@ function NET.ws_update()
             elseif op=='close' then
                 msg=JSON.decode(msg)
                 if msg and msg.message then LOG("[WS Close] " .. tostring(msg.message)) end
-                if SCN.cur == 'net_game' and TASK.getLock('netPlaying') then
+                if (SCN.cur == 'net_game' or SCN.cur == 'net_rankedGame') and TASK.getLock('netPlaying') then
                     MES.new('info',text.wsClose:repD(msg and msg.message or msg))
                     TEST.yieldUntilNextScene()
                     GAME.playing=false
-                    SCN.backTo('lobby')
+                    if SCN.cur == 'net_rankedGame' then
+                        SCN.go('net_ranked')
+                    else
+                        SCN.backTo('lobby')
+                    end
                 end
                 NET.triggerReconnect()
                 return

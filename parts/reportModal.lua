@@ -11,11 +11,11 @@ local roomId = ""
 local matchId = ""
 
 local reasons = {
-    {id = "macro",     label = "Macro / Auto-Player (Bot)"},
-    {id = "speedhack", label = "Speedhack / Clock Warp"},
-    {id = "exploit",   label = "Illegal Attack / Desync Exploit"},
-    {id = "toxic",     label = "Abusive / Offensive Chat"},
-    {id = "other",     label = "Other Suspicious Behavior"},
+    {id = "macro",     label = "Macro / Bot / Autoplayer",        icon = "🤖"},
+    {id = "speedhack", label = "Speedhack / Clock Manipulation",  icon = "⏱"},
+    {id = "exploit",   label = "Desync / Combat Exploit",         icon = "💥"},
+    {id = "toxic",     label = "Abusive / Toxic Chat",            icon = "💬"},
+    {id = "other",     label = "Other Suspicious Behavior",       icon = "❓"},
 }
 local selectedReason = 1
 local details = ""
@@ -29,9 +29,9 @@ local gc_replaceTransform = gc.replaceTransform
 local gc_print, gc_printf = gc.print, gc.printf
 local setFont = FONT.set
 
-local MODAL_W, MODAL_H = 640, 520
-local MODAL_X = (1280 - MODAL_W) * 0.5
-local MODAL_Y = (720 - MODAL_H) * 0.5
+local MODAL_W, MODAL_H = 780, 580
+local MODAL_X = math.floor((1280 - MODAL_W) * 0.5)
+local MODAL_Y = math.floor((720 - MODAL_H) * 0.5)
 
 local function _close()
     _isOpen = false
@@ -94,10 +94,32 @@ function REPORT.update(dt)
     end
 end
 
+-- Helper to get category chip geometry
+local function _getChipRect(idx)
+    local padding = 24
+    local spacing = 12
+    local chipW = math.floor((MODAL_W - padding * 2 - spacing) * 0.5)
+    local chipH = 38
+    local startY = MODAL_Y + 162
+
+    local row = math.floor((idx - 1) / 2)
+    local col = (idx - 1) % 2
+
+    local chipX = MODAL_X + padding + col * (chipW + spacing)
+    local chipY = startY + row * (chipH + 8)
+
+    if idx == 5 then
+        -- 5th chip spans full width
+        chipW = MODAL_W - padding * 2
+    end
+
+    return chipX, chipY, chipW, chipH
+end
+
 function REPORT.draw()
     if overlayAlpha <= 0 and boxAlpha <= 0 then return end
 
-    -- 1. Full-screen Dark Overlay
+    -- 1. Full-screen Dark Backdrop
     gc_push('transform')
     gc_replaceTransform(SCR.origin)
     if overlayAlpha > 0 then
@@ -110,152 +132,166 @@ function REPORT.draw()
 
     local t = love.timer.getTime()
     local mx, my = getMousePos()
-
-    -- 2. Modal Body
     local bA = boxAlpha
+
+    gc_push('transform')
+    gc_replaceTransform(SCR.xOy)
+
+    -- 2. Modal Window Frame
     gc_setColor(.07, .09, .18, .96 * bA)
     gc_rectangle('fill', MODAL_X, MODAL_Y, MODAL_W, MODAL_H, 12)
 
-    -- Border Glow
+    -- Glowing Security Border
     local borderGlow = 0.75 + 0.25 * math.sin(t * 3.5)
-    gc_setColor(.85, .30, .25, borderGlow * bA)
+    gc_setColor(.85, .28, .25, borderGlow * bA)
     gc_setLineWidth(2)
     gc_rectangle('line', MODAL_X, MODAL_Y, MODAL_W, MODAL_H, 12)
 
-    -- Header Banner
-    gc_setColor(.18, .08, .12, .95 * bA)
-    gc_rectangle('fill', MODAL_X, MODAL_Y, MODAL_W, 52, 12)
-    gc_rectangle('fill', MODAL_X, MODAL_Y + 38, MODAL_W, 14)
+    -- 3. Header Banner
+    gc_setColor(.20, .08, .12, .96 * bA)
+    gc_rectangle('fill', MODAL_X, MODAL_Y, MODAL_W, 54, 12)
+    gc_rectangle('fill', MODAL_X, MODAL_Y + 38, MODAL_W, 16)
     gc_setColor(1.0, .35, .30, .85 * bA)
-    gc_setLineWidth(1)
-    gc.line(MODAL_X, MODAL_Y + 52, MODAL_X + MODAL_W, MODAL_Y + 52)
+    gc_setLineWidth(1.5)
+    gc.line(MODAL_X, MODAL_Y + 54, MODAL_X + MODAL_W, MODAL_Y + 54)
 
-    setFont(20)
-    gc_setColor(1.0, .85, .85, bA)
-    gc_print("🚩 REPORT PLAYER", MODAL_X + 22, MODAL_Y + 14)
+    setFont(21)
+    gc_setColor(1.0, .88, .88, bA)
+    gc_print("🚩 PLAYER REPORT & FAIR PLAY REVIEW", MODAL_X + 24, MODAL_Y + 15)
 
     -- Close Button [✕] (Top right)
-    local closeBtnX = MODAL_X + MODAL_W - 40
+    local closeBtnX = MODAL_X + MODAL_W - 44
     local closeBtnY = MODAL_Y + 14
-    local isCloseHov = _pointInRect(mx, my, closeBtnX - 4, closeBtnY - 4, 28, 28)
-    gc_setColor(isCloseHov and 1.0 or .70, .40, .40, bA)
-    setFont(16)
-    gc_print("✕", closeBtnX, closeBtnY)
+    local isCloseHov = _pointInRect(mx, my, closeBtnX - 4, closeBtnY - 4, 32, 32)
+    gc_setColor(isCloseHov and 1.0 or .75, .40, .40, bA)
+    setFont(20)
+    gc_print("✕", closeBtnX + 2, closeBtnY)
 
-    -- Target Player Info Pill
-    gc_setColor(.12, .16, .30, .9 * bA)
-    gc_rectangle('fill', MODAL_X + 22, MODAL_Y + 66, MODAL_W - 44, 44, 6)
-    gc_setColor(.35, .45, .75, .6 * bA)
+    -- 4. Target Player Context Pill
+    local userPillY = MODAL_Y + 68
+    gc_setColor(.12, .16, .30, .92 * bA)
+    gc_rectangle('fill', MODAL_X + 24, userPillY, MODAL_W - 48, 50, 8)
+    gc_setColor(.35, .45, .75, .65 * bA)
     gc_setLineWidth(1)
-    gc_rectangle('line', MODAL_X + 22, MODAL_Y + 66, MODAL_W - 44, 44, 6)
+    gc_rectangle('line', MODAL_X + 24, userPillY, MODAL_W - 48, 50, 8)
 
-    setFont(13)
+    setFont(14)
     gc_setColor(.65, .78, 1.0, .85 * bA)
-    gc_print("Reported User:", MODAL_X + 34, MODAL_Y + 80)
-    setFont(15)
+    gc_print("Reported Player:", MODAL_X + 38, userPillY + 16)
+
+    setFont(17)
     gc_setColor(1.0, .90, .40, bA)
-    gc_print(targetUsername, MODAL_X + 140, MODAL_Y + 79)
-    setFont(12)
-    gc_setColor(.50, .60, .80, .85 * bA)
-    gc_print("(UID: " .. targetUid .. ")", MODAL_X + 145 + FONT.get(15):getWidth(targetUsername), MODAL_Y + 82)
+    gc_print(targetUsername, MODAL_X + 160, userPillY + 14)
 
-    -- Reason Selection Section
     setFont(13)
-    gc_setColor(.75, .85, 1.0, .9 * bA)
-    gc_print("Select Violation Category:", MODAL_X + 22, MODAL_Y + 124)
+    gc_setColor(.55, .65, .85, .85 * bA)
+    local uidLabel = "UID: " .. targetUid
+    if roomId ~= "" then uidLabel = uidLabel .. "  •  Room: " .. roomId end
+    gc_print("(" .. uidLabel .. ")", MODAL_X + 168 + FONT.get(17):getWidth(targetUsername), userPillY + 17)
 
-    local startY = MODAL_Y + 146
+    -- 5. Violation Category Section
+    local catTitleY = userPillY + 60
+    setFont(14)
+    gc_setColor(.85, .90, 1.0, .95 * bA)
+    gc_print("Select Violation Category:", MODAL_X + 24, catTitleY)
+
     for i, r in ipairs(reasons) do
-        local chipY = startY + (i - 1) * 36
+        local chipX, chipY, chipW, chipH = _getChipRect(i)
         local isSel = (selectedReason == i)
-        local isHov = _pointInRect(mx, my, MODAL_X + 22, chipY, MODAL_W - 44, 30)
+        local isHov = _pointInRect(mx, my, chipX, chipY, chipW, chipH)
 
         if isSel then
-            gc_setColor(.75, .25, .20, .85 * bA)
-            gc_rectangle('fill', MODAL_X + 22, chipY, MODAL_W - 44, 30, 6)
-            gc_setColor(1.0, .55, .50, bA)
+            gc_setColor(.75, .25, .20, .90 * bA)
+            gc_rectangle('fill', chipX, chipY, chipW, chipH, 6)
+            gc_setColor(1.0, .60, .55, bA)
             gc_setLineWidth(1.5)
-            gc_rectangle('line', MODAL_X + 22, chipY, MODAL_W - 44, 30, 6)
-            gc_setColor(1, 1, 1, bA)
+            gc_rectangle('line', chipX, chipY, chipW, chipH, 6)
         else
-            gc_setColor(isHov and .18 or .10, isHov and .22 or .13, isHov and .35 or .22, .8 * bA)
-            gc_rectangle('fill', MODAL_X + 22, chipY, MODAL_W - 44, 30, 6)
-            gc_setColor(.28, .36, .58, (isHov and .8 or .5) * bA)
+            gc_setColor(isHov and .18 or .10, isHov and .22 or .13, isHov and .35 or .22, .85 * bA)
+            gc_rectangle('fill', chipX, chipY, chipW, chipH, 6)
+            gc_setColor(.28, .36, .58, (isHov and .90 or .55) * bA)
             gc_setLineWidth(1)
-            gc_rectangle('line', MODAL_X + 22, chipY, MODAL_W - 44, 30, 6)
-            gc_setColor(.85, .90, .98, (isHov and 1.0 or .80) * bA)
+            gc_rectangle('line', chipX, chipY, chipW, chipH, 6)
         end
 
-        -- Radio dot indicator
-        gc_setColor(isSel and 1.0 or .50, isSel and .60 or .60, isSel and .55 or .70, bA)
-        gc_circle(isSel and 'fill' or 'line', MODAL_X + 40, chipY + 15, isSel and 5 or 4)
+        -- Radio indicator
+        gc_setColor(isSel and 1.0 or .50, isSel and .65 or .60, isSel and .60 or .70, bA)
+        gc_circle(isSel and 'fill' or 'line', chipX + 22, chipY + chipH * 0.5, isSel and 6 or 5)
 
-        setFont(13)
-        gc_setColor(isSel and 1.0 or .85, isSel and 1.0 or .88, 1.0, bA)
-        gc_print(r.label, MODAL_X + 54, chipY + 7)
+        setFont(14)
+        gc_setColor(isSel and 1.0 or .88, isSel and 1.0 or .90, 1.0, bA)
+        gc_print(r.icon .. "  " .. r.label, chipX + 38, chipY + 10)
     end
 
-    -- Details Input Label
-    local inputLabelY = startY + #reasons * 36 + 10
-    setFont(13)
-    gc_setColor(.75, .85, 1.0, .9 * bA)
-    gc_print("Additional Details / Evidence (Optional):", MODAL_X + 22, inputLabelY)
+    -- 6. Details / Evidence Input Area
+    local inputLabelY = MODAL_Y + 316
+    setFont(14)
+    gc_setColor(.85, .90, 1.0, .95 * bA)
+    gc_print("Additional Details & Evidence (Optional):", MODAL_X + 24, inputLabelY)
 
-    -- Details Input Box
-    local inBoxY = inputLabelY + 22
-    local inBoxH = 64
+    setFont(12)
+    gc_setColor(.60, .70, .88, .80 * bA)
+    local charCountStr = #details .. " / 300"
+    gc.printf(charCountStr, MODAL_X + 24, inputLabelY + 2, MODAL_W - 48, 'right')
+
+    local inBoxY = inputLabelY + 24
+    local inBoxH = 112
     gc_setColor(.09, .12, .24, .95 * bA)
-    gc_rectangle('fill', MODAL_X + 22, inBoxY, MODAL_W - 44, inBoxH, 6)
-    gc_setColor(isInputFocused and 1.0 or .28, isInputFocused and .60 or .40, isInputFocused and .55 or .70, (isInputFocused and 1.0 or .6) * bA)
-    gc_setLineWidth(isInputFocused and 1.5 or 1)
-    gc_rectangle('line', MODAL_X + 22, inBoxY, MODAL_W - 44, inBoxH, 6)
+    gc_rectangle('fill', MODAL_X + 24, inBoxY, MODAL_W - 48, inBoxH, 8)
 
-    setFont(13)
+    gc_setColor(isInputFocused and 1.0 or .28, isInputFocused and .60 or .40, isInputFocused and .55 or .70, (isInputFocused and 1.0 or .65) * bA)
+    gc_setLineWidth(isInputFocused and 1.5 or 1)
+    gc_rectangle('line', MODAL_X + 24, inBoxY, MODAL_W - 48, inBoxH, 8)
+
+    setFont(14)
     if #details == 0 and not isInputFocused then
-        gc_setColor(.45, .55, .70, .7 * bA)
-        gc_print("Describe what happened (e.g. impossible speed, instant placements, chat spam)...", MODAL_X + 32, inBoxY + 12)
+        gc_setColor(.45, .55, .70, .75 * bA)
+        gc_printf("Describe what happened (e.g. impossible placement speed, clock lag, offensive chat messages)...", MODAL_X + 36, inBoxY + 14, MODAL_W - 72, 'left')
     else
         gc_setColor(1, 1, 1, bA)
-        gc_printf(details .. (isInputFocused and ((t * 2 % 1 > .5) and "|" or "") or ""), MODAL_X + 32, inBoxY + 10, MODAL_W - 64, 'left')
+        local cursorStr = (isInputFocused and ((t * 2 % 1 > .5) and "|" or "") or "")
+        gc_printf(details .. cursorStr, MODAL_X + 36, inBoxY + 14, MODAL_W - 72, 'left')
     end
 
-    -- Bottom Buttons: Cancel & Submit
-    local btnY = inBoxY + inBoxH + 18
-    local btnH = 46
+    -- 7. Bottom Action Bar: Cancel & Submit
+    local btnY = MODAL_Y + MODAL_H - 66
+    local btnH = 48
 
     -- Cancel Button
-    local cancelW = 160
-    local cancelX = MODAL_X + 22
+    local cancelW = 190
+    local cancelX = MODAL_X + 24
     local isCancelHov = _pointInRect(mx, my, cancelX, btnY, cancelW, btnH)
-    gc_setColor(isCancelHov and .22 or .12, isCancelHov and .25 or .14, isCancelHov and .35 or .22, .9 * bA)
+    gc_setColor(isCancelHov and .22 or .12, isCancelHov and .25 or .14, isCancelHov and .35 or .22, .92 * bA)
     gc_rectangle('fill', cancelX, btnY, cancelW, btnH, 8)
-    gc_setColor(.35, .45, .70, isCancelHov and .9 or .6 * bA)
+    gc_setColor(.35, .45, .70, isCancelHov and .95 or .65 * bA)
     gc_setLineWidth(1)
     gc_rectangle('line', cancelX, btnY, cancelW, btnH, 8)
-    gc_setColor(.85, .90, 1.0, isCancelHov and 1.0 or .8 * bA)
-    setFont(15)
+    gc_setColor(.85, .90, 1.0, isCancelHov and 1.0 or .85 * bA)
+    setFont(16)
     gc_printf("Cancel", cancelX, btnY + 13, cancelW, 'center')
 
     -- Submit Report CTA Button
-    local submitW = MODAL_W - 44 - cancelW - 14
-    local submitX = cancelX + cancelW + 14
+    local submitW = MODAL_W - 48 - cancelW - 16
+    local submitX = cancelX + cancelW + 16
     local isSubmitHov = _pointInRect(mx, my, submitX, btnY, submitW, btnH)
     if isSubmitHov then
-        gc_setColor(.75, .20, .20, .95 * bA)
+        gc_setColor(.80, .22, .22, .98 * bA)
         gc_rectangle('fill', submitX, btnY, submitW, btnH, 8)
-        gc_setColor(1.0, .60, .60, bA)
+        gc_setColor(1.0, .65, .65, bA)
         gc_setLineWidth(2)
         gc_rectangle('line', submitX, btnY, submitW, btnH, 8)
     else
-        gc_setColor(.55, .15, .15, .90 * bA)
+        gc_setColor(.60, .16, .16, .92 * bA)
         gc_rectangle('fill', submitX, btnY, submitW, btnH, 8)
-        gc_setColor(.90, .35, .35, .85 * bA)
+        gc_setColor(.95, .38, .38, .85 * bA)
         gc_setLineWidth(1.5)
         gc_rectangle('line', submitX, btnY, submitW, btnH, 8)
     end
     gc_setColor(1, 1, 1, bA)
-    setFont(15)
-    gc_printf("SUBMIT REPORT  ✦", submitX, btnY + 13, submitW, 'center')
+    setFont(16)
+    gc_printf("🚩  SUBMIT REPORT  ✦", submitX, btnY + 13, submitW, 'center')
+
+    gc_pop()
 end
 
 local function _submit()
@@ -289,19 +325,18 @@ function REPORT.mouseDown(x, y)
     if not REPORT.isOpen() or boxAlpha < 0.5 then return false end
 
     -- Check close button
-    local closeBtnX = MODAL_X + MODAL_W - 40
+    local closeBtnX = MODAL_X + MODAL_W - 44
     local closeBtnY = MODAL_Y + 14
-    if _pointInRect(x, y, closeBtnX - 4, closeBtnY - 4, 28, 28) then
+    if _pointInRect(x, y, closeBtnX - 4, closeBtnY - 4, 32, 32) then
         SFX.play('back')
         _close()
         return true
     end
 
     -- Check reason selection
-    local startY = MODAL_Y + 146
     for i = 1, #reasons do
-        local chipY = startY + (i - 1) * 36
-        if _pointInRect(x, y, MODAL_X + 22, chipY, MODAL_W - 44, 30) then
+        local chipX, chipY, chipW, chipH = _getChipRect(i)
+        if _pointInRect(x, y, chipX, chipY, chipW, chipH) then
             selectedReason = i
             SFX.play('click')
             return true
@@ -309,10 +344,9 @@ function REPORT.mouseDown(x, y)
     end
 
     -- Check details input box focus
-    local inputLabelY = startY + #reasons * 36 + 10
-    local inBoxY = inputLabelY + 22
-    local inBoxH = 64
-    if _pointInRect(x, y, MODAL_X + 22, inBoxY, MODAL_W - 44, inBoxH) then
+    local inBoxY = MODAL_Y + 340
+    local inBoxH = 112
+    if _pointInRect(x, y, MODAL_X + 24, inBoxY, MODAL_W - 48, inBoxH) then
         isInputFocused = true
         love.keyboard.setTextInput(true)
         return true
@@ -320,19 +354,19 @@ function REPORT.mouseDown(x, y)
         isInputFocused = false
     end
 
-    -- Check buttons
-    local btnY = inBoxY + inBoxH + 18
-    local btnH = 46
-    local cancelW = 160
-    local cancelX = MODAL_X + 22
+    -- Check action buttons
+    local btnY = MODAL_Y + MODAL_H - 66
+    local btnH = 48
+    local cancelW = 190
+    local cancelX = MODAL_X + 24
     if _pointInRect(x, y, cancelX, btnY, cancelW, btnH) then
         SFX.play('back')
         _close()
         return true
     end
 
-    local submitW = MODAL_W - 44 - cancelW - 14
-    local submitX = cancelX + cancelW + 14
+    local submitW = MODAL_W - 48 - cancelW - 16
+    local submitX = cancelX + cancelW + 16
     if _pointInRect(x, y, submitX, btnY, submitW, btnH) then
         _submit()
         return true
@@ -355,18 +389,37 @@ REPORT.touchClick = REPORT.mouseDown
 function REPORT.keyDown(key, isRep)
     if not REPORT.isOpen() then return false end
 
+    local ctrl = love.keyboard.isDown('lctrl', 'rctrl') or love.keyboard.isDown('lgui', 'rgui')
+
     if key == 'escape' then
         SFX.play('back')
         _close()
         return true
     elseif key == 'return' or key == 'kpenter' then
-        if not isInputFocused then
+        if ctrl or not isInputFocused then
             _submit()
+            return true
+        else
+            -- Allow newline if input focused and length under limit
+            if #details < 295 then
+                details = details .. "\n"
+            end
             return true
         end
     elseif key == 'backspace' then
         if #details > 0 then
             details = details:sub(1, -2)
+        end
+        return true
+    elseif ctrl and key == 'v' then
+        -- Paste clipboard content
+        local clip = love.system.getClipboardText()
+        if clip and type(clip) == 'string' then
+            local clean = clip:gsub("[%c]", " ")
+            local remaining = 300 - #details
+            if remaining > 0 then
+                details = details .. clean:sub(1, remaining)
+            end
         end
         return true
     end
@@ -375,7 +428,7 @@ end
 
 function REPORT.textInput(t)
     if not REPORT.isOpen() or not isInputFocused then return false end
-    if #details < 256 then
+    if #details < 300 then
         details = details .. t
     end
     return true
