@@ -59,13 +59,21 @@ def generate_all(source_path: Path, project_root: Path):
     src_img.resize((512, 512), Image.Resampling.LANCZOS).save(playstore_path, "PNG")
     print(f"Generated Android Play Store icon: {playstore_path} (512x512)")
 
-    # 4b. Standard mipmaps (legacy icon.png and icon_round.png)
+    # 4b. Standard mipmaps and love-android default drawables (@drawable/love)
     standard_densities = {
         "mipmap-mdpi": 48,
         "mipmap-hdpi": 72,
         "mipmap-xhdpi": 96,
         "mipmap-xxhdpi": 144,
         "mipmap-xxxhdpi": 192,
+    }
+
+    drawable_densities = {
+        "drawable-mdpi": 48,
+        "drawable-hdpi": 72,
+        "drawable-xhdpi": 96,
+        "drawable-xxhdpi": 144,
+        "drawable-xxxhdpi": 192,
     }
 
     for folder, size in standard_densities.items():
@@ -75,6 +83,13 @@ def generate_all(source_path: Path, project_root: Path):
         scaled.save(dir_path / "icon.png", "PNG")
         scaled.save(dir_path / "icon_round.png", "PNG")
         print(f"Generated Android {folder}/icon.png & icon_round.png ({size}x{size})")
+
+    for folder, size in drawable_densities.items():
+        dir_path = android_res / folder
+        dir_path.mkdir(parents=True, exist_ok=True)
+        scaled = src_img.resize((size, size), Image.Resampling.LANCZOS)
+        scaled.save(dir_path / "love.png", "PNG")
+        print(f"Generated Android {folder}/love.png ({size}x{size})")
 
     # 4c. Adaptive Icons (icon_foreground.png & icon_background.png)
     # Adaptive icons total size is 108dp canvas, with safe icon centered in inner 66dp (~61% scale)

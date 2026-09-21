@@ -148,7 +148,7 @@ jobs:
       - name: Generate Android icons
         run: |
           pip install Pillow
-          python3 teblocks-src/.github/scripts/generate_icons.py teblocks-src/icon.png || python3 teblocks-src/.github/scripts/generate_icons.py
+          python3 teblocks-src/.github/scripts/generate_icons.py teblocks-src/logo.png teblocks-src || python3 teblocks-src/.github/scripts/generate_icons.py teblocks-src/icon.png teblocks-src || python3 teblocks-src/.github/scripts/generate_icons.py teblocks-src
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -207,10 +207,15 @@ jobs:
           mkdir -p love-android/app/src/main/jniLibs
           cp -r teblocks-src/ColdClear/Android/* love-android/app/src/main/jniLibs/ 2>/dev/null || true
 
-          # Copy custom Android app icons into love-android resources
+          # Copy custom Android app icons into love-android resources (both main and embed flavors)
           if [ -d teblocks-src/.github/build/android/release/res ]; then
             echo "Embedding custom Android app icons..."
+            mkdir -p love-android/app/src/main/res love-android/app/src/embed/res
             cp -r teblocks-src/.github/build/android/release/res/* love-android/app/src/main/res/ 2>/dev/null || true
+            cp -r teblocks-src/.github/build/android/release/res/* love-android/app/src/embed/res/ 2>/dev/null || true
+
+            # Update AndroidManifest to reference @mipmap/icon and @mipmap/icon_round (or fallback to love drawable)
+            sed -i 's|android:icon="@drawable/love"|android:icon="@mipmap/icon" android:roundIcon="@mipmap/icon_round"|g' love-android/app/src/main/AndroidManifest.xml
           fi
 
       - name: Decode keystore (if configured)
