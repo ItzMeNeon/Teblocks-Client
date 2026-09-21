@@ -86,9 +86,16 @@ def generate_all(source_path: Path, project_root: Path):
         "mipmap-xxxhdpi": 432,
     }
 
-    # Prepare background color: detect edge or average color or default dark slate #1c1c1e
-    # If source has transparent edges, background layer provides a nice dark backdrop
-    bg_color = (28, 28, 30, 255) # Modern dark theme neutral background
+    # Detect background color from edge of source image (ignoring transparent corners)
+    # Default to modern dark theme if fully transparent
+    bg_color = (28, 28, 30, 255)
+    for sample_coord in [(w // 2, 10), (10, h // 2), (w - 10, h // 2), (w // 2, h - 10)]:
+        px = src_img.getpixel(sample_coord)
+        if px[3] > 100:
+            # Found non-transparent background color in the logo
+            bg_color = (px[0], px[1], px[2], 255)
+            break
+    print(f"Detected adaptive background color: {bg_color}")
 
     for folder, total_size in adaptive_densities.items():
         dir_path = android_res / folder
