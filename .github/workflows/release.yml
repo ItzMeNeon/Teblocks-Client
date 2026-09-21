@@ -48,6 +48,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate platform icons
+        run: |
+          pip install Pillow
+          python3 .github/scripts/generate_icons.py
+
       - name: Build .love file
         run: |
           zip -9 -r teblocks.love . \
@@ -77,8 +82,14 @@ jobs:
           mkdir -p squashfs-root/lib/lua/5.1
           cp ColdClear/Linux/CCloader.so squashfs-root/lib/lua/5.1/ 2>/dev/null || true
 
-          # Update desktop metadata
+          # Update desktop metadata and icons
           sed -i 's/^Name=.*/Name=TeBlocks/' squashfs-root/love.desktop
+          if [ -f .github/build/linux/release/icon.png ]; then
+            cp .github/build/linux/release/icon.png squashfs-root/teblocks.png
+            cp .github/build/linux/release/icon.png squashfs-root/love.png
+            cp .github/build/linux/release/icon.png squashfs-root/.DirIcon
+            sed -i 's/^Icon=.*/Icon=teblocks/' squashfs-root/love.desktop
+          fi
 
           # Repackage AppImage with appimagetool
           curl -L -o appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -92,6 +103,14 @@ jobs:
             https://github.com/love2d/love/releases/download/${LOVE_VERSION}/love-${LOVE_VERSION}-win64.zip
           unzip -q love-win.zip -d love-win
           WINDIR="love-win/love-${LOVE_VERSION}-win64"
+
+          # Embed custom icon into love.exe if icon.ico is present
+          if [ -f .github/build/windows/release/icon.ico ]; then
+            sudo apt-get update -qq && sudo apt-get install -y wine64 wine || true
+            curl -sL https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe -o rcedit.exe
+            wine rcedit.exe "$WINDIR/love.exe" --set-icon .github/build/windows/release/icon.ico || true
+          fi
+
           mkdir -p dist/teblocks-windows
           cat "$WINDIR/love.exe" teblocks.love > dist/teblocks-windows/teblocks.exe
           cp "$WINDIR"/*.dll dist/teblocks-windows/ 2>/dev/null || true
@@ -125,6 +144,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: teblocks-src
+
+      - name: Generate Android icons
+        run: |
+          pip install Pillow
+          python3 teblocks-src/.github/scripts/generate_icons.py teblocks-src/icon.png || python3 teblocks-src/.github/scripts/generate_icons.py
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -182,6 +206,12 @@ jobs:
           # Embed ColdClear Android libraries if available
           mkdir -p love-android/app/src/main/jniLibs
           cp -r teblocks-src/ColdClear/Android/* love-android/app/src/main/jniLibs/ 2>/dev/null || true
+
+          # Copy custom Android app icons into love-android resources
+          if [ -d teblocks-src/.github/build/android/release/res ]; then
+            echo "Embedding custom Android app icons..."
+            cp -r teblocks-src/.github/build/android/release/res/* love-android/app/src/main/res/ 2>/dev/null || true
+          fi
 
       - name: Decode keystore (if configured)
         env:
