@@ -16,7 +16,7 @@ local threadCode=[[
     while true do
         -- local arg=sendCHN:demand()
         -- Warning: workaround for love.js
-        while sendCHN:getCount()==0 do sleep(.0626) end
+        while sendCHN:getCount()==0 do sleep(.005) end
         local arg=sendCHN:pop()
 
         if arg._destroy then
@@ -76,7 +76,7 @@ local msgPool=setmetatable({},{
 local HTTP={
     _msgCount=0,
     _trigTime=0,
-    _trigInterval=.26,
+    _trigInterval=.02,
     _host=false,
 }
 

@@ -617,7 +617,7 @@ else
     WS.switchHost('backend.teblocks.my.id','80','/api/ws')
 end
 HTTP.setHost(SERVER_HOST)
-HTTP.setThreadCount(1)
+HTTP.setThreadCount(4)
 
 -- Connect to gameserver on startup
 NET.startupConnect()

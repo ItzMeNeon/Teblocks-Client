@@ -9,67 +9,75 @@ local JSON=require'Zframework.json'
 local sleep=require'love.timer'.sleep
 
 do-- Connect
-    -- Warning: workaround for love.js, used to use CHN_demand instead
-    while CHN_getCount(sendCHN)<5 do sleep(.0626) end
+    -- Fast non-blocking check for connection params
+    while CHN_getCount(sendCHN)<5 do sleep(.005) end
     local host=CHN_pop(sendCHN)
     local port=CHN_pop(sendCHN)
     local path=CHN_pop(sendCHN)
     local head=CHN_pop(sendCHN)
     local timeout=CHN_pop(sendCHN)
 
-    SOCK:settimeout(timeout)
-    local res,err=SOCK:connect(host,port)
-    -- print('C0',res,err)
-    assert(res,err)
+    local ok,connErr=pcall(function()
+        SOCK:settimeout(timeout)
+        local res,err=SOCK:connect(host,port)
+        if not res then error(err or "Connection failed") end
 
-    -- WebSocket handshake
-    SOCK:send(
-        'GET '..path..' HTTP/1.1\r\n'..
-        'Host: '..host..'\r\n'..
-        'Connection: Upgrade\r\n'..
-        'Upgrade: websocket\r\n'..
-        'Sec-WebSocket-Version: 13\r\n'..
-        'Sec-WebSocket-Key: osT3F7mvlojIvf3/8uIsJQ==\r\n'..-- secKey
-        head..
-        '\r\n'
-    )
+        SOCK:setoption('tcp-nodelay',true)
+        SOCK:setoption('keepalive',true)
 
-    -- First line of HTTP
-    res,err=SOCK:receive('*l')
-    -- print('C',res,err)
-    assert(res,err)
-    local code,ctLen
-    code=res:find(' ')
-    code=res:sub(code+1,code+3)
+        -- WebSocket handshake
+        SOCK:send(
+            'GET '..path..' HTTP/1.1\r\n'..
+            'Host: '..host..'\r\n'..
+            'Connection: Upgrade\r\n'..
+            'Upgrade: websocket\r\n'..
+            'Sec-WebSocket-Version: 13\r\n'..
+            'Sec-WebSocket-Key: osT3F7mvlojIvf3/8uIsJQ==\r\n'..-- secKey
+            head..
+            '\r\n'
+        )
 
-    -- Get body length from headers and remove headers
-    repeat
+        -- First line of HTTP
         res,err=SOCK:receive('*l')
-        -- print('H',res,err)
-        assert(res,err)
-        if not ctLen and res:lower():find('content%-length') then
-            ctLen=tonumber(res:match('%d+')) or 0
-        end
-    until res==''
+        if not res then error(err or "No response from server") end
+        local code,ctLen
+        code=res:find(' ')
+        code=res:sub(code+1,code+3)
 
-    -- Result
-    if code=='101' then
-        CHN_push(readCHN,'success')
-    else
-        local body = ""
-        if ctLen and ctLen > 0 then
-            body = SOCK:receive(ctLen) or ""
+        -- Get body length from headers and remove headers
+        repeat
+            res,err=SOCK:receive('*l')
+            if not res then error(err or "Header read error") end
+            if not ctLen and res:lower():find('content%-length') then
+                ctLen=tonumber(res:match('%d+')) or 0
+            end
+        until res==''
+
+        -- Result
+        if code=='101' then
+            CHN_push(readCHN,'success')
+        else
+            local body=""
+            if ctLen and ctLen>0 then
+                body=SOCK:receive(ctLen) or ""
+            end
+            local reason=body
+            local okParsed,parsed=pcall(JSON.decode,body)
+            if okParsed and type(parsed)=='table' and parsed.reason then
+                reason=parsed.reason
+            end
+            if reason=="" then reason="HTTP status "..tostring(code) end
+            error((code or "XXX")..":"..reason)
         end
-        local reason = body
-        local ok, parsed = pcall(JSON.decode, body)
-        if ok and type(parsed) == 'table' and parsed.reason then
-            reason = parsed.reason
-        end
-        if reason == "" then reason = "HTTP status " .. tostring(code) end
-        error((code or "XXX")..":"..reason)
+
+        SOCK:settimeout(0)
+    end)
+
+    if not ok then
+        CHN_push(readCHN,tostring(connErr))
+        pcall(function() SOCK:close() end)
+        return
     end
-
-    SOCK:settimeout(0)
 end
 
 local yield=coroutine.yield
@@ -93,11 +101,19 @@ local function _send(op,message)
         else
             SOCK:send(char(bor(length,0x80)))
         end
-        local msgbyte={byte(message,1,length)}
-        for i=1,length do
-            msgbyte[i]=bxor(msgbyte[i],mask_key[(i-1)%4+1])
+        local chunks={}
+        local CHUNK_SIZE=2048
+        for chunkStart=1,length,CHUNK_SIZE do
+            local chunkEnd=math.min(chunkStart+CHUNK_SIZE-1,length)
+            local count=chunkEnd-chunkStart+1
+            local msgbyte={byte(message,chunkStart,chunkEnd)}
+            for i=1,count do
+                local globalIdx=chunkStart+i-2
+                msgbyte[i]=bxor(msgbyte[i],mask_key[(globalIdx%4)+1])
+            end
+            chunks[#chunks+1]=char(unpack(msgbyte))
         end
-        return SOCK:send(mask_str..char(unpack(msgbyte)))
+        return SOCK:send(mask_str..table.concat(chunks))
     else
         SOCK:send('\128'..mask_str)
         return 0
@@ -189,18 +205,38 @@ local readThread=coroutine.wrap(function()
     end
 end)
 
+local socket=require'socket'
 local success,err
+local selList={SOCK}
 
 while true do-- Running
-    while CHN_getCount(triggerCHN)==0 do sleep(.0626) end
-    CHN_pop(triggerCHN)
-    success,err=pcall(sendThread)
-    if not success or err then break end
-    success,err=pcall(readThread)
-    if not success or err then break end
+    -- Drain trigger channel signals
+    while CHN_getCount(triggerCHN)>0 do CHN_pop(triggerCHN) end
+
+    -- Send any pending messages immediately
+    if CHN_getCount(sendCHN)>=2 then
+        success,err=pcall(sendThread)
+        if not success or err then break end
+    end
+
+    -- Fast wakeup via socket.select (0ms when packet arrives; 2ms idle timeout to check outbound)
+    local hasPendingSend=CHN_getCount(sendCHN)>=2
+    local timeout=hasPendingSend and 0 or 0.002
+    local readable=socket.select(selList,nil,timeout)
+
+    if readable and readable[1] then
+        local readLimit=50
+        while readLimit>0 do
+            readLimit=readLimit-1
+            success,err=pcall(readThread)
+            if not success or err then break end
+            local more=socket.select(selList,nil,0)
+            if not (more and more[1]) then break end
+        end
+        if not success or err then break end
+    end
 end
 
 SOCK:close()
 CHN_push(readCHN,8)-- close
 CHN_push(readCHN,err or "Disconnected")
-error()

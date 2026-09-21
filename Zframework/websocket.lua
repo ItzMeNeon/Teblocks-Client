@@ -16,6 +16,8 @@ local wsList=setmetatable({},{
             real=false,
             status='dead',
             lastPongTime=timer(),
+            lastPingSentTime=false,
+            ping=false,
             sendTimer=0,
             alertTimer=0,
             pongTimer=0,
@@ -55,6 +57,8 @@ function WS.connect(name,subPath,head,timeout)
         readCHN=love.thread.newChannel(),
         lastPingTime=0,
         lastPongTime=timer(),
+        lastPingSentTime=false,
+        ping=false,
         pingInterval=6,
         status='connecting',-- 'connecting', 'running', 'dead'
         sendTimer=0,
@@ -73,6 +77,11 @@ end
 function WS.status(name)
     local ws=wsList[name]
     return ws.status or 'dead'
+end
+
+function WS.getPing(name)
+    local ws=wsList[name]
+    return ws and ws.ping or false
 end
 
 function WS.getTimers(name)
@@ -112,6 +121,9 @@ function WS.send(name,message,op)
         if ws.real and ws.status=='running' then
             ws.sendCHN:push(op and OPcode[op] or 2)-- 2=binary
             ws.sendCHN:push(message)
+            if ws.triggerCHN:getCount()==0 then
+                ws.triggerCHN:push(0)
+            end
             ws.lastPingTime=timer()
             ws.sendTimer=1
         end
@@ -125,12 +137,20 @@ function WS.read(name)
     local ws=wsList[name]
     if ws.real and ws.status~='connecting' and ws.readCHN:getCount()>=2 then
         local op,message=ws.readCHN:pop(),ws.readCHN:pop()
+        local now=timer()
         if op==8 then-- 8=close
             ws.status='dead'
         elseif op==9 then-- 9=ping
             WS.send(name,message or "",'pong')
+        elseif op==10 then-- 10=pong
+            if ws.lastPingSentTime then
+                local rtt=math.floor((now-ws.lastPingSentTime)*1000)
+                if rtt>=0 and rtt<10000 then
+                    ws.ping=rtt
+                end
+            end
         end
-        ws.lastPongTime=timer()
+        ws.lastPongTime=now
         ws.pongTimer=1
         return message,OPname[op] or op
     end
@@ -168,7 +188,8 @@ function WS.update(dt)
                     end
                 elseif ws.status=='running' then
                     if time-ws.lastPingTime>ws.pingInterval then
-                        WS.send(name,"",'pong')
+                        ws.lastPingSentTime=time
+                        WS.send(name,"",'ping')
                     end
                     if time-ws.lastPongTime>6+2*ws.pingInterval then
                         WS.close(name)

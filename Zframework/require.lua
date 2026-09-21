@@ -1,19 +1,38 @@
+local ext=(SYSTEM=='Windows') and 'dll' or (SYSTEM=='macOS') and 'dylib' or 'so'
 local ccDir
+local arch=jit and jit.arch or 'x64'
 if SYSTEM=='Linux' then
     ccDir='ColdClear/Linux'
 elseif SYSTEM=='Windows' then
-    local arch=jit and jit.arch or 'x64'
     ccDir='ColdClear/Windows/'..(arch=='x64' and 'x64' or 'x86')
+elseif SYSTEM=='Android' then
+    local platform=(function()
+        local p=io.popen('uname -m')
+        if p then
+            local a=p:read('*a'):lower()
+            p:close()
+            if a:find('v8') and not a:find('v8l') or a:find('64') then
+                return 'arm64-v8a'
+            end
+        end
+        return 'armeabi-v7a'
+    end)()
+    ccDir='ColdClear/Android/'..platform
 end
+
+local sourcePath=love.filesystem.getSource()
+local gameLibPath=sourcePath and (sourcePath..'/'..ccDir..'/?.'..ext) or (ccDir..'/?.'..ext)
+
 package.cpath=package.cpath
-    ..';'..love.filesystem.getSaveDirectory()..'/lib/?.so'
+    ..';'..gameLibPath
+    ..';'..ccDir..'/?.'..ext
     ..';?.dylib'
-    ..(ccDir and ';'..ccDir..'/?.'..(SYSTEM=='Windows' and 'dll' or 'so') or '')
+    ..(SYSTEM=='Android' and (';'..love.filesystem.getSaveDirectory()..'/lib/?.'..ext) or '')
+
 local loaded={}
 local errorCount={}
 return function(libName)
     local require=require
-    local arch='unknown'
     local success,res
     if SYSTEM=='Web' then
         return
@@ -28,20 +47,15 @@ return function(libName)
             success,res=false,'package.loadlib returned nil, along with:\n[2]:\n'..b..'[3]:\n'..c
         end
     else
-        if SYSTEM=='Android' and not loaded[libName] then
-            local platform=(function()
-                local p=io.popen('uname -m')
-                arch=p:read('*a'):lower()
-                p:close()
-                if arch:find('v8') and not arch:find('v8l') or arch:find('64') then
-                    return 'arm64-v8a'
-                else
-                    return 'armeabi-v7a'
+        if SYSTEM=='Android' and not loaded[libName] and ccDir then
+            local srcPath=ccDir..'/'..libName..'.'..ext
+            local targetFile='lib/'..libName..'.'..ext
+            if not love.filesystem.getInfo(targetFile) and love.filesystem.getInfo(srcPath) then
+                local data=love.filesystem.read('data',srcPath)
+                if data then
+                    love.filesystem.createDirectory('lib')
+                    love.filesystem.write(targetFile,data)
                 end
-            end)()
-            local data=love.filesystem.read('data','ColdClear/Android/'..platform..'/'..libName..'.so')
-            if data then
-                love.filesystem.write('lib/'..libName..'.so',data)
             end
             loaded[libName]=true
         end

@@ -45,6 +45,7 @@ local NET={
 
     onlineCount="0",
     onlinePlayers={},-- List of online players (id, username, elo)
+    ping=false,
 
     textBox=WIDGET.newTextBox{name='texts',x=20,y=110,w=980,h=500},
     inputBox=WIDGET.newInputBox{name='input',x=20,y=630,w=980,h=50,limit=256},
@@ -145,6 +146,7 @@ local function parseError(pathStr)
     MES.new('error',pathStr,5)
 end
 local function getMsg(request,timeout)
+    timeout=timeout or 6.26
     HTTP(request)
     local totalTime=0
     while true do
@@ -1674,17 +1676,28 @@ function NET.ws_update()
 
         updateOnlineCD=updateOnlineCD%626+1
         if updateOnlineCD==1 then NET.global_getOnlineCount() end
-        if updateOnlineCD%125==0 then NET.online_getPlayers() end
+        if updateOnlineCD%125==0 and not (SCN.cur == 'net_game' or SCN.cur == 'net_rankedGame') then
+            NET.online_getPlayers()
+        end
 
-        local msg,op=WS.read('game')
-        if msg then
+        local readLimit=100
+        while readLimit>0 do
+            local rawMsg,op=WS.read('game')
+            if not rawMsg then break end
+            readLimit=readLimit-1
+
+            NET.ping=WS.getPing('game')
+
             if op=='ping' then
+                -- Handled in WS.read
             elseif op=='pong' then
+                -- Handled in WS.read
             elseif op=='close' then
-                msg=JSON.decode(msg)
+                local ok,msg=pcall(JSON.decode,rawMsg)
+                if not ok or type(msg)~='table' then msg={message=tostring(rawMsg)} end
                 if msg and msg.message then LOG("[WS Close] " .. tostring(msg.message)) end
                 if (SCN.cur == 'net_game' or SCN.cur == 'net_rankedGame') and TASK.getLock('netPlaying') then
-                    MES.new('info',text.wsClose:repD(msg and msg.message or msg))
+                    MES.new('info',text.wsClose:repD(msg and msg.message or rawMsg))
                     TEST.yieldUntilNextScene()
                     GAME.playing=false
                     if SCN.cur == 'net_rankedGame' then
@@ -1695,21 +1708,23 @@ function NET.ws_update()
                 end
                 NET.triggerReconnect()
                 return
-            elseif msg then
-                msg=JSON.decode(msg)
-                if msg.errno~=0 then
-                    local errMsg=msg.message
-                    if not errMsg and msg.data and type(msg.data)=='table' and msg.data.reason then
-                        errMsg=msg.data.reason
+            elseif type(rawMsg)=='string' then
+                local ok,msg=pcall(JSON.decode,rawMsg)
+                if ok and type(msg)=='table' then
+                    if msg.errno and msg.errno~=0 then
+                        local errMsg=msg.message
+                        if not errMsg and msg.data and type(msg.data)=='table' and msg.data.reason then
+                            errMsg=msg.data.reason
+                        end
+                        parseError(errMsg~=nil and errMsg or ('err '..tostring(msg.action)..'/'..tostring(msg.errno)))
+                    else
+                        local f=NET.wsCallBack[actMap[msg.action]]
+                        if f then f(msg) end
                     end
-                    parseError(errMsg~=nil and errMsg or ('err '..tostring(msg.action)..'/'..tostring(msg.errno)))
                 else
-                    local f=NET.wsCallBack[actMap[msg.action]]
-                    if f then f(msg) end
+                    MES.new('warn',"Wrong json: "..tostring(rawMsg),5)
+                    WS.alert('user')
                 end
-            else
-                MES.new('warn',"Wrong json: "..msg,5)
-                WS.alert('user')
             end
         end
     end
@@ -1720,7 +1735,7 @@ end
 -- Submit a Quick Play score to the server. Fire-and-forget: the result (best
 -- score + leaderboard rank) is surfaced as a message if the request succeeds.
 function NET.submitQuickPlayScore(mode,score)
-    if not USER.aToken then return end
+    if not USER.aToken or (type(mode)=='string' and mode:sub(1,7)=='custom_') then return end
     TASK.new(function()
         local res=getMsg({
             pool='score',
@@ -1742,7 +1757,7 @@ function NET.submitQuickPlayScore(mode,score)
 end
 
 function NET.reportHistory(data)
-    if not USER.aToken then return end
+    if not USER.aToken or (data and type(data.mode)=='string' and data.mode:sub(1,7)=='custom_') then return end
     TASK.new(function()
         local body={
             mode=data.mode,

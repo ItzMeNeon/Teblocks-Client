@@ -631,8 +631,9 @@ function gameOver()-- Save record
     trySave()
 
     local M=GAME.curMode
+    local isCustom=M.name:sub(1,7)=='custom_' or (GAME.modeEnv and GAME.modeEnv.isCustom) or (M.isCustom)
     local R=M.getRank
-    if R then
+    if R and not isCustom then
         local P=PLAYERS[1]
         R=R(P)-- New rank
         if R then
@@ -693,7 +694,7 @@ function gameOver()-- Save record
             end
         end
     end
-    if not GAME.replaying and not GAME.net and USER.uid and PLAYERS[1] and PLAYERS[1].type=='human' then
+    if not isCustom and not GAME.replaying and not GAME.net and USER.uid and PLAYERS[1] and PLAYERS[1].type=='human' then
         NET.reportHistory({
             mode=M.name,
             score=PLAYERS[1].stat.score or 0,

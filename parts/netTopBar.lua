@@ -181,9 +181,9 @@ function NET_BAR.draw(subtitle, backLabel)
     gc.printf(subtitle or "ONLINE MULTIPLAYER", 0, 36, 1280, 'center')
 
     -- Online Players Count Pill (top right, left of profile card)
-    local pCountX = 874
+    local pCountX = 854
     local pCountY = 8
-    local pCountW = 144
+    local pCountW = 164
     local pCountH = 36
     gc_setColor(.06, .09, .20, .65)
     gc_rectangle('fill', pCountX, pCountY, pCountW, pCountH, 6)
@@ -200,6 +200,9 @@ function NET_BAR.draw(subtitle, backLabel)
     if isWsConnected then
         gc_setColor(.2, .9, .4, dotAlpha)
         countStr = (onlineNum and onlineNum > 0) and (onlineNum .. " Online") or "1 Online"
+        if NET and NET.ping then
+            countStr = countStr .. " (" .. NET.ping .. "ms)"
+        end
     elseif NET and (NET._isReconnecting or NET._reconnectCountdown) then
         gc_setColor(.95, .75, .2, dotAlpha)
         countStr = "Reconnecting..."
