@@ -181,9 +181,36 @@ function WS.update(dt)
                             ws.lastPingTime=time
                             ws.lastPongTime=time
                             ws.pongTimer=1
+                            if NET then NET.serverDown=false end
                         else
                             ws.status='dead'
-                            MES.new('warn',text.wsFailed:repD(mes))
+                            local isDown=false
+                            local reasonStr=""
+                            if type(mes)=='table' then
+                                if mes.serverDown or (mes.code and (mes.code==530 or mes.code>=500 or mes.code~=200)) then
+                                    isDown=true
+                                end
+                                reasonStr=mes.reason or tostring(mes.code or "failed")
+                            elseif type(mes)=='string' then
+                                if mes:find("530") or mes:find("serverDown") or mes:find("refused") or mes:find("unreachable") or mes:find("50%d") then
+                                    isDown=true
+                                end
+                                reasonStr=mes:gsub(".-:%d+:%s*","")
+                            end
+                            if isDown then
+                                if NET then NET.serverDown=true end
+                                if not ws.silent and (USER and (USER.oToken or USER.aToken)) then
+                                    local t=love.timer.getTime()
+                                    if t-(ws.lastDownAlert or 0)>4.5 then
+                                        ws.lastDownAlert=t
+                                        MES.new('warn',text.serverDown or "Server is down",5)
+                                    end
+                                end
+                            else
+                                if not ws.silent and (USER and (USER.oToken or USER.aToken)) then
+                                    MES.new('warn',text.wsFailed:repD(reasonStr),5)
+                                end
+                            end
                         end
                     end
                 elseif ws.status=='running' then

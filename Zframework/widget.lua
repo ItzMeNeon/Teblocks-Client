@@ -181,11 +181,15 @@ function button:update(dt)
         if ATV>0 then self.ATV=max(ATV-dt*30,0) end
     end
 end
+button.setText=button.setObject
+
 function button:draw()
     local x,y,w,h=self.x,self.y,self.w,self.h
     local ATV=self.ATV
     local c=self.color
-    local r,g,b=c[1],c[2],c[3]
+    if type(c)=='string' then c=COLOR[c] or COLOR.Z end
+    c=c or COLOR.Z
+    local r,g,b=c[1] or 0.5,c[2] or 0.5,c[3] or 0.5
 
     -- Button
     gc_setColor(.15+r*.7,.15+g*.7,.15+b*.7,.9)
@@ -318,6 +322,7 @@ function key:setObject(obj)
         self.obj=obj
     end
 end
+key.setText=key.setObject
 function key:isAbove(x,y)
     return
         x>self.x and
@@ -340,8 +345,10 @@ function key:draw()
     local x,y,w,h=self.x,self.y,self.w,self.h
     local ATV=self.ATV
     local c=self.color
+    if type(c)=='string' then c=COLOR[c] or COLOR.Z end
+    c=c or COLOR.Z
     local align=self.align
-    local r,g,b=c[1],c[2],c[3]
+    local r,g,b=c[1] or 0.5,c[2] or 0.5,c[3] or 0.5
 
     -- Fill
     if self.fShade then

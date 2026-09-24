@@ -182,6 +182,24 @@ function SCN.swapTo(tar,style,...)-- Parallel scene swapping, cannot back
     end
 end
 function SCN.go(tar,style,...)-- Normal scene swapping, can back
+    -- Deprecate old full-screen setting_* scenes in favor of the unified Settings Sidebar
+    if tar and string.sub(tar, 1, 8) == 'setting_' then
+        local catMap = {
+            setting_video = 'graphics',
+            setting_sound = 'audio',
+            setting_game = 'gameplay',
+            setting_control = 'controls',
+            setting_key = 'keys',
+            setting_skin = 'skin',
+            setting_touch = 'controls',
+            setting_touchSwitch = 'controls',
+        }
+        if SETTINGS and SETTINGS.open then
+            SETTINGS.open(catMap[tar] or 'gameplay')
+            return
+        end
+    end
+
     if scenes[tar] then
         if not SCN.swapping then
             SCN.push(SCN.stack[#SCN.stack] or '_')

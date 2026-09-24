@@ -152,7 +152,7 @@ function M.snapshot(P)
         bufferedIMS=P.bufferedIMS,
         bufferedDelay=P.bufferedDelay,
         -- stream
-        stream=_copyTable(P.stream),
+        stream=P.stream,
         streamProgress=P.streamProgress,
         -- status
         alive=P.alive,

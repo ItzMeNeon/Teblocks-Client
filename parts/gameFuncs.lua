@@ -139,6 +139,7 @@ do-- function applySettings()
         Z.setFrameMul(SETTING.frameMul)
         Z.setPowerInfo(SETTING.powerInfo)
         Z.setCleanCanvas(SETTING.cleanCanvas)
+        Z.setMaxFPS(SETTING.maxFPS or 'unlimited')
 
         -- Apply VK shape
         VK.setShape(SETTING.VKSkin)
@@ -257,7 +258,7 @@ do -- Master GRADED
         elseif index<41 then
             return master_postm_grades_text[index-27]
         else
-            return master_postm_grades_text[#master_postm_grades]..index-39
+            return master_postm_grades_text[#master_postm_grades_text].." "..(index-39)
         end
     end
 end
@@ -424,7 +425,7 @@ function getItem(itemName,amount)
     STAT.item[itemName]=STAT.item[itemName]+(amount or 1)
 end
 function generateLine(hole)
-    return 1023-2^(hole-1)
+    return math.floor(1023-2^(hole-1))
 end
 function notEmptyLine(L)
     for i=1,10 do
@@ -971,7 +972,7 @@ do-- function freshPlayerPosition(sudden)
             end
         end
 
-        local alive=PLAYERS[1].alive
+        local alive=PLAYERS[1] and PLAYERS[1].alive
 
         if mode=='update' then
             if alive then
@@ -1100,10 +1101,9 @@ do-- function resetGameData(args)
             GAME.replaying=true
         else
             GAME.frameStart=args:find'n' and 0 or 180-SETTING.reTime*60
-            -- Match seeds are 64-bit and arrive as exact strings; tonumber keeps
-            -- the live match and the replay on the identical seed so piece
-            -- sequences don't diverge.
-            GAME.seed=tonumber(seed) or seed or math.random(1046101471)
+            -- Match seeds are 64-bit and arrive as exact strings; keep the seed
+            -- intact so piece sequences do not diverge between live play and replays.
+            GAME.seed=seed or math.random(1046101471)
             GAME.saved=false
             GAME.setting=_copyGameSetting()
             GAME.tasUsed=false
@@ -1169,7 +1169,8 @@ do-- function checkWarning(P,dt)
                         end
                     end
                 end
-                GAME.warnLVL0=math.log(height-(P.gameEnv.fieldH-5)+P.atkBufferSum*.8)
+                local dangerVal=height-(P.gameEnv.fieldH-5)+P.atkBufferSum*.8
+                GAME.warnLVL0=dangerVal>1 and math.log(dangerVal) or 0
             end
             local _=GAME.warnLVL
             if _<GAME.warnLVL0 then

@@ -89,6 +89,7 @@ function VOC.init(list)
         end
 
         function VOC.play(s,chn)
+            if VOC._mute or (GAME and GAME.seeking) then return end
             if volume>0 then
                 local _=Source[s]
                 if not _ then return end

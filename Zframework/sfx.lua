@@ -152,6 +152,7 @@ local function _play(name,vol,pos,pitch)
 end
 SFX.fplay=_play-- Play sounds without apply module's volume setting
 function SFX.play(name,vol,pos,pitch)
+    if SFX._mute or (GAME and GAME.seeking) then return end
     _play(name,(vol or 1)*volume,pos,pitch)
 end
 function SFX.reset()

@@ -585,8 +585,9 @@ local function _drawNext(P,repMode)
 end
 local _drawDial do
     local _dialBackColor={COLOR.H,COLOR.Z,COLOR.lC,COLOR.lG,COLOR.lY,COLOR.O,COLOR.R}
-    local _dialColor={COLOR.Z,COLOR.lC,COLOR.lG,COLOR.lY,COLOR.O,COLOR.R}
+    local _dialColor={COLOR.Z,COLOR.lC,COLOR.lG,COLOR.lY,COLOR.O,COLOR.R,COLOR.P}
     local function _getDialIdx(speed)
+        speed=tonumber(speed) or 0
         if speed<240 then
             if speed<120 then
                 return speed<60 and 1 or 2
@@ -600,12 +601,13 @@ local _drawDial do
         end
     end
     local function _getDialBackColor(speed)
-        return _dialBackColor[_getDialIdx(speed)]
+        return _dialBackColor[_getDialIdx(speed)] or COLOR.R
     end
     local function _getDialColor(speed)
-        return _dialColor[_getDialIdx(speed)]
+        return _dialColor[_getDialIdx(speed)] or COLOR.P
     end
     function _drawDial(x,y,speed)
+        speed=tonumber(speed) or 0
         local theta=3*math.pi/2+((math.pi*(speed<300 and speed or 150+speed/2)/30)%MATH.tau)
 
         gc_setColor(0,0,0,.4)

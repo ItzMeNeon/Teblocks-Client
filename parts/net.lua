@@ -62,7 +62,7 @@ function NET.freshRoomAllReady()
 
     if playCount>1 and playCount-readyCount==1 then
         local p=NETPLY.map[USER.uid]
-        if p.playMode=='Gamer' and p.readyMode~='Ready' and TASK.lock('urgeReady',1) then
+        if p and p.playMode=='Gamer' and p.readyMode~='Ready' and TASK.lock('urgeReady',1) then
             SFX.play('warn_2',.5)
         end
     end
@@ -91,33 +91,47 @@ local ignoreError={
     ["Techrater.PlayerManager.invalidRefreshToken"]=true,
 }
 local availableErrorTextType={info=1,warn=1,error=1}
+local lastServerDownTime=0
+local function notifyServerDown()
+    local t=love.timer.getTime()
+    if t-lastServerDownTime>4.5 then
+        lastServerDownTime=t
+        MES.new('info',text.serverDown or "Server is down",5)
+    end
+end
 local function parseError(pathStr)
     if ignoreError[pathStr] then return end
-    LOG(pathStr)
     if type(pathStr)~='string' then
         MES.new('error',"<"..tostring(pathStr)..">",5)
         return
     end
 
-    -- Clean up raw HTTP status codes
-    if pathStr:find("^HTTP[ .]%d%d%d") then
-        local code = tonumber(pathStr:match("%d%d%d"))
-        if code == 400 then
+    local code = tonumber(pathStr:match("HTTP[ .](%d%d%d)")) or tonumber(pathStr:match("^(%d%d%d)"))
+    if code then
+        if code == 530 or code >= 500 or (code ~= 200 and code ~= 400 and code ~= 401 and code ~= 403 and code ~= 404 and code ~= 409) then
+            NET.serverDown = true
+            LOG("[HTTP] Server is down ("..tostring(code)..")")
+            notifyServerDown()
+            return
+        elseif code == 400 then
             pathStr = "Invalid request or incorrect credentials"
         elseif code == 401 then
             pathStr = "Incorrect username or password"
         elseif code == 403 then
-            pathStr = "Please verify your account before logging in"
+            if pathStr:lower():find("account_banned") or pathStr:lower():find("suspended") then
+                pathStr = "Your account has been suspended"
+            elseif pathStr:lower():find("ip_banned") or pathStr:lower():find("prohibited") then
+                pathStr = "Access or registration prohibited from this network"
+            else
+                pathStr = "Please verify your account before logging in"
+            end
         elseif code == 404 then
             pathStr = "Requested resource not found"
         elseif code == 409 then
             pathStr = "Username or email is already registered"
-        elseif code == 500 then
-            pathStr = "Server error occurred, please try again"
-        elseif code == 502 or code == 503 or code == 504 then
-            pathStr = "Game server is currently unreachable"
         end
     end
+    LOG(pathStr)
 
     -- Check Techrater i18n tree
     if pathStr:find("^Techrater%.") then
@@ -152,11 +166,26 @@ local function getMsg(request,timeout)
     while true do
         local msg=HTTP.pollMsg(request.pool)
         if msg then
+            local cNum = tonumber(msg.code)
+            if cNum and (cNum == 530 or cNum >= 500 or (cNum ~= 200 and cNum ~= 400 and cNum ~= 401 and cNum ~= 403 and cNum ~= 404 and cNum ~= 409)) then
+                NET.serverDown = true
+                if not request.silentError then
+                    notifyServerDown()
+                end
+                return {code=cNum, message=text.serverDown or "Server is down"}
+            end
             if type(msg.body)=='string' and #msg.body>0 then
                 local ok,body=pcall(JSON._decode,msg.body)
                 if ok and type(body)=='table' then
                     body.code=body.code or msg.code
-                    if tostring(body.code):sub(1,1)~='2' then
+                    local bCode = tonumber(body.code)
+                    if bCode and (bCode == 530 or bCode >= 500 or (bCode ~= 200 and bCode ~= 400 and bCode ~= 401 and bCode ~= 403 and bCode ~= 404 and bCode ~= 409)) then
+                        NET.serverDown = true
+                        if not request.silentError then
+                            notifyServerDown()
+                        end
+                        return body
+                    elseif tostring(body.code):sub(1,1)~='2' then
                         local errMsg = body.message or body.error
                         if not errMsg and msg and msg.body then
                             errMsg = tostring(msg.body)
@@ -181,13 +210,13 @@ local function getMsg(request,timeout)
                     return {code=msg.code, message=errMsg}
                 else
                     if not request.silentError then
-                        MES.new('info',text.serverDown)
+                        notifyServerDown()
                     end
                     return
                 end
             else
                 if not request.silentError then
-                    MES.new('info',text.serverDown)
+                    notifyServerDown()
                 end
                 return
             end
@@ -293,6 +322,16 @@ function NET.loginWithPassword(username,password)
         elseif res then
             if res.code == 401 or res.error == 'invalid_credentials' or (res.message and res.message:lower():find('incorrect')) then
                 MES.new('error', "Incorrect username or password", 5)
+            elseif res.code == 403 and (res.error == 'account_banned' or (res.message and res.message:lower():find('suspended'))) then
+                local reason = res.message or "Account suspended"
+                local AUTH = require 'parts.authModal'
+                if AUTH and AUTH.openBan then
+                    AUTH.openBan(reason)
+                else
+                    MES.new('error', reason, 15)
+                end
+            elseif res.code == 403 and (res.error == 'ip_banned' or (res.message and res.message:lower():find('prohibited'))) then
+                MES.new('error', res.message or "Access prohibited from this network", 10)
             elseif res.code == 403 or res.error == 'unverified' or (res.message and res.message:lower():find('verify')) then
                 MES.new('warn', "Account is not verified! Please verify your account first.", 6)
                 local AUTH = require 'parts.authModal'
@@ -398,10 +437,11 @@ local noticeLang={
 }
 function NET.launchNotice()
     TASK.new(function()
+        local lang=noticeLang[SETTING.locale] or 'en_us'
         local res=getMsg({
             pool='getNotice',
             url=AUTHHOST,
-            path='/api/notice?language='..noticeLang[SETTING.locale]..'&lastCount=1',
+            path='/api/notice?language='..lang..'&lastCount=1',
         },6.26)
 
         if res and res.code==200 then
@@ -417,15 +457,16 @@ end
 function NET.getNotice(count)
     WAIT{timeout=6.26}
     TASK.new(function()
+        local lang=noticeLang[SETTING.locale] or 'en_us'
         local res=getMsg({
             pool='getNotice',
             url=AUTHHOST,
-            path='/api/notice?language='..noticeLang[SETTING.locale]..'&lastCount='..(count or 5),
+            path='/api/notice?language='..lang..'&lastCount='..(count or 5),
         },6.26)
 
         if res and res.code==200 then
             WAIT.interrupt()
-            SCN.go('notice',nil,noticeLang[SETTING.locale],res.data.contents)
+            SCN.go('notice',nil,lang,res.data.contents)
         end
     end)
 end
@@ -461,6 +502,10 @@ local actMap={
     online_playerLeave=     1314,
     player_updateElo=       1315,
     global_chat=            1316,
+    player_report=          1321,
+    player_banned=          1322,
+    player_kicked=          1323,
+    server_broadcast=       1324,
     match_join=             1400,
     match_leave=            1401,
     match_found=            1402,
@@ -536,11 +581,11 @@ function NET.global_getOnlineCount()
 end
 
 -- Global
-function NET.global_chat(text)
+function NET.global_chat(msg)
     if not TASK.lock('chatLimit',1.26) then
         MES.new('warn',text.tooFrequent)
-    elseif #text>0 then
-        wsSend(actMap.global_chat,{message=text})
+    elseif msg and #msg>0 then
+        wsSend(actMap.global_chat,{message=msg})
         return true
     end
 end
@@ -733,9 +778,19 @@ end
 -- from the in-memory GAME.rep. Returns the raw bytes string, or false.
 local function _buildLocalRepBytes()
     if not GAME.rep or #GAME.rep==0 then return false end
+    local r=NET.rankedResult
+    local oppName=(r and r.oppId and USERS.getUsername(r.oppId)) or ""
     local metadata={
         date=os.date("%Y/%m/%d %H:%M:%S"),
-        mode=GAME.curModeName,
+        mode=GAME.curModeName or 'netBattle',
+        netType='ranked',
+        matchId=r and r.matchId,
+        opponent=oppName~="" and oppName or nil,
+        opponentId=r and r.oppId,
+        result=r and (r.winnerId==USER.uid and 'win' or 'loss'),
+        myScore=r and r.myScore,
+        oppScore=r and r.oppScore,
+        duration=(PLAYERS[1] and PLAYERS[1].frameRun) or 0,
         version=VERSION.string,
         player=USERS.getUsername(USER.uid),
         -- Store the exact seed string (NET.seed) rather than the numeric
@@ -753,6 +808,54 @@ local function _buildLocalRepBytes()
     return content
 end
 
+-- Save casual room replay locally so players can review multiplayer room matches
+function NET.saveCasualReplay()
+    if not GAME.rep or #GAME.rep==0 then return end
+    local roomName=(NET.roomState.info and NET.roomState.info.name) or "Casual"
+    local roomId=NET.roomState.id or "room"
+    local oppPlayer=PLAYERS[2]
+    local oppName=oppPlayer and (USERS.getUsername(oppPlayer.uid) or oppPlayer.username or "Opponent")
+    local oppStreamStr=""
+    if oppPlayer and oppPlayer.stream and #oppPlayer.stream>0 then
+        oppStreamStr=DATA.dumpRecording(oppPlayer.stream)
+    end
+    local myDuration=(PLAYERS[1] and PLAYERS[1].frameRun) or 0
+    local oppDuration=(oppPlayer and oppPlayer.frameRun) or 0
+    local maxDuration=math.max(myDuration,oppDuration)
+    local myWon=PLAYERS[1] and PLAYERS[1].alive
+    local result=oppPlayer and (myWon and 'win' or 'loss') or 'play'
+
+    local metadata={
+        date=os.date("%Y/%m/%d %H:%M:%S"),
+        mode='netBattle',
+        netType='casual',
+        roomName=roomName,
+        player=USERS.getUsername(USER.uid) or "Player",
+        opponent=oppName,
+        opponentId=oppPlayer and oppPlayer.uid,
+        oppStream=oppStreamStr,
+        result=result,
+        duration=maxDuration,
+        version=VERSION.string,
+        seed=NET.seed,
+        setting=GAME.setting,
+        mod={},
+        tasUsed=false,
+    }
+
+    local dateStr=os.date("%Y_%m_%d_%H%M%S")
+    local fn=("replay/casual_%s_%s.rep"):format(dateStr,tostring(roomId):sub(1,8))
+    local ok,content=pcall(love.data.compress,'string','zlib',
+        JSON.encode(metadata).."\n"..DATA.dumpRecording(GAME.rep))
+    if ok and content then
+        love.filesystem.write(fn,content)
+        local rep=DATA.parseReplay(fn)
+        if rep and rep.available then
+            table.insert(REPLAY,1,rep)
+        end
+    end
+end
+
 -- Upload the local player's replay for a finished ranked match. The server
 -- stores it under replays/<matchId>/<playerId>.rep so both participants' runs
 -- live in the same match folder. Fire-and-forget (best effort).
@@ -766,25 +869,6 @@ function NET.uploadRankedReplay(matchId)
             playerId=USER.uid,
             data=love.data.encode('string','base64',content),
         })
-    end)
-end
-
--- Save both players' replays locally (under replay/ranked_<matchId>_<uid>.rep)
--- so they appear in the replay list and can be watched later. The local file
--- is built from GAME.rep directly; the opponent's is fetched from the server.
-function NET.saveRankedReplays(matchId,oppId)
-    if not matchId or not USER.uid then return end
-    TASK.new(function()
-        local content=_buildLocalRepBytes()
-        if content then
-            love.filesystem.write(("replay/ranked_%s_%s.rep"):format(matchId,USER.uid),content)
-        end
-        if oppId then
-            local oppRaw=_fetchRankedReplayRaw(matchId,oppId)
-            if oppRaw then
-                love.filesystem.write(("replay/ranked_%s_%s.rep"):format(matchId,oppId),oppRaw)
-            end
-        end
     end)
 end
 
@@ -810,6 +894,39 @@ local function _fetchRankedReplayRaw(matchId,playerId)
             if totalTime>6.26 then return false end
         end
     end
+end
+
+-- Save both players' replays locally (under replay/ranked_<matchId>_<uid>.rep)
+-- so they appear in the replay list and can be watched later. The local file
+-- is built from GAME.rep directly; the opponent's is fetched from the server.
+function NET.saveRankedReplays(matchId,oppId)
+    if not matchId or not USER.uid then return end
+    TASK.new(function()
+        local content=_buildLocalRepBytes()
+        if content then
+            local myFn=("replay/ranked_%s_%s.rep"):format(matchId,USER.uid)
+            love.filesystem.write(myFn,content)
+            local r1=DATA.parseReplay(myFn)
+            if r1 and r1.available then
+                local exists=false
+                for _,r in next,REPLAY do if r.fileName==myFn then exists=true break end end
+                if not exists then table.insert(REPLAY,1,r1) end
+            end
+        end
+        if oppId then
+            local oppRaw=_fetchRankedReplayRaw(matchId,oppId)
+            if oppRaw then
+                local oppFn=("replay/ranked_%s_%s.rep"):format(matchId,oppId)
+                love.filesystem.write(oppFn,oppRaw)
+                local r2=DATA.parseReplay(oppFn)
+                if r2 and r2.available then
+                    local exists=false
+                    for _,r in next,REPLAY do if r.fileName==oppFn then exists=true break end end
+                    if not exists then table.insert(REPLAY,1,r2) end
+                end
+            end
+        end
+    end)
 end
 
 -- Download both players' replays for a finished ranked match, save them
@@ -889,62 +1006,170 @@ local function _replayStreamLength(list)
         last=list[i]
         local ev=list[i+1]
         if ev==nil then break end
-        if ev<=64 then i=i+2
-        elseif ev<=128 then i=i+8
-        else i=i+2 end
+        if ev<=64 then
+            i=i+2
+        elseif ev<=128 then
+            -- Extra event: eventID is ev-64.
+            -- attack is event 1 with 5 params (1 time + 1 ev + 1 sourceSid + 5 params = 8 entries)
+            -- garbageRise is event 2 with 3 params (6 entries)
+            local paramCount=(ev==65 and 5) or (ev==66 and 3) or 5
+            i=i+2+1+paramCount
+        else
+            i=i+2
+        end
     end
     return last
 end
 
--- Restart the ranked replay from frame 0 and fast-forward to `frame`, used by
--- the seek bar. Rebuilds the players/streams from the stored recordings, then
--- lets net_game drive the simulation up to the target frame.
-function NET.seekRankedReplay(frame)
-    local reps=NET._replayReps
-    if not reps then return end
-    -- Capture where each board currently sits so a backward seek animates it
-    -- back into place instead of popping in from the center at scale 0. Prefer
-    -- the end-of-replay snapshot (covers boards that had already dropped out
-    -- and been removed from PLAYERS), falling back to the live positions.
-    local oldPos=NET._replayEndPos or {}
-    if not next(oldPos) then
-        for p=1,#PLAYERS do
-            local P=PLAYERS[p]
-            if P.uid then oldPos[P.uid]={P.x,P.y,P.size} end
+-- Smooth keyframe-based seek: restores nearest snapshot <= frame, then
+-- steps forward remaining < 60 frames in microtime (<0.5ms). Caches all
+-- newly simulated keyframes along the way for real-time scrubbing.
+function NET.seekReplay(frame)
+    if not GAME.replaying or not NET._replayKeyframes or #PLAYERS<2 then return end
+    local total=NET._replayTotal or 0
+    frame=math.max(0,math.min(math.floor(frame or 0),total>0 and total or frame))
+
+    local SNAPSHOT=require('parts.player.snapshot')
+
+    -- Find nearest cached keyframe <= frame
+    local kTarget=math.floor(frame/60)*60
+    local bestK=0
+    for f=kTarget,0,-60 do
+        if NET._replayKeyframes[f] then
+            bestK=f
+            break
         end
     end
+
+    local snap=NET._replayKeyframes[bestK]
+    if snap then
+        GAME.seeking=true
+        for p=1,#PLAYERS do
+            if snap.players[p] then
+                SNAPSHOT.restore(PLAYERS[p],snap.players[p])
+                PLAYERS[p].bonus={}
+            end
+        end
+        TABLE.cut(PLY_ALIVE)
+        for p=1,#PLAYERS do
+            if PLAYERS[p].alive then
+                table.insert(PLY_ALIVE,PLAYERS[p])
+            end
+        end
+
+        -- Fast-forward from bestK to target frame
+        local curF=bestK
+        while curF<frame do
+            local finished=true
+            for p=1,#PLAYERS do
+                local P=PLAYERS[p]
+                if P.alive and P.stream and P.stream[P.streamProgress] then
+                    finished=false
+                end
+            end
+            if finished then break end
+
+            for p=1,#PLAYERS do PLAYERS[p]:update(1/60) end
+            curF=curF+1
+
+            if curF%60==0 and not NET._replayKeyframes[curF] then
+                local kSnap={players={}}
+                for p=1,#PLAYERS do
+                    kSnap.players[p]=SNAPSHOT.snapshot(PLAYERS[p])
+                end
+                NET._replayKeyframes[curF]=kSnap
+            end
+        end
+        GAME.seeking=false
+    end
+
+    NET._replayCur=frame
     NET._replayEndPos=nil
-    resetGameData('n',NET.seed)
+    if NET._replaySettled then
+        NET._replaySettled=false
+        freshPlayerPosition('update')
+    end
+end
+NET.seekRankedReplay=NET.seekReplay
+
+-- Synchronously initialize streams onto the newly created players right after
+-- resetGameData in net_game.lua.
+function NET._initReplayStreams()
+    if not (NET._replayReps and NET._replayReps.myRep and NET._replayReps.oppRep) then return end
+    if #PLAYERS<2 then return end
+
+    local myRep=NET._replayReps.myRep
+    local oppRep=NET._replayReps.oppRep
+    local myUid=tostring(NET._replayReps.myUid or "")
+    local oppUid=tostring(NET._replayReps.oppUid or "")
+
+    local myList={}  DATA.pumpRecording(myRep.data or "",myList)
+    local oppList={} DATA.pumpRecording(oppRep.data or "",oppList)
+    GAME.rep=myList
     GAME.replaying=true
     GAME.replaySetup=false
     GAME.recording=false
-    local myList={}  DATA.pumpRecording(reps.myRep.data,myList)
-    local oppList={} DATA.pumpRecording(reps.oppRep.data,oppList)
-    GAME.rep=myList
-    if PLAYERS[1] and PLAYERS[2] then
-        PLAYERS[1]:startStreaming(myList)
-        PLAYERS[2]:startStreaming(oppList)
+
+    -- Match players by UID so streams never get inverted
+    local pMy=PLAYERS[1]
+    local pOpp=PLAYERS[2]
+    for i=1,#PLAYERS do
+        if tostring(PLAYERS[i].uid)==myUid then
+            pMy=PLAYERS[i]
+        elseif tostring(PLAYERS[i].uid)==oppUid then
+            pOpp=PLAYERS[i]
+        end
     end
-    -- Re-lay the rebuilt boards out from their previous (end-of-replay)
-    -- positions, smoothly moving and scaling them into the new layout.
-    for p=1,#PLAYERS do
-        local o=oldPos[PLAYERS[p].uid]
-        if o then PLAYERS[p]:setPosition(o[1],o[2],o[3]) end
+    if pMy==pOpp and #PLAYERS>=2 then
+        pMy=PLAYERS[1]
+        pOpp=PLAYERS[2]
     end
-    freshPlayerPosition('update')
-    NET._replayFF=true
-    NET._replayFFTarget=frame or 0
+
+    if pMy then
+        pMy:startStreaming(myList)
+        if myRep.player and #myRep.player>0 then
+            pMy.username=myRep.player
+        end
+        pMy.sound=true
+    end
+    if pOpp then
+        pOpp:startStreaming(oppList)
+        if oppRep.player and #oppRep.player>0 then
+            pOpp.username=oppRep.player
+        end
+    end
+
+    NET._replayTotal=math.max(_replayStreamLength(myList),_replayStreamLength(oppList))
+    local SNAPSHOT=require('parts.player.snapshot')
+    NET._replayKeyframes={
+        [0]={
+            players={
+                [1]=SNAPSHOT.snapshot(PLAYERS[1]),
+                [2]=SNAPSHOT.snapshot(PLAYERS[2]),
+            }
+        }
+    }
     NET._replayCur=0
+    NET._replayFF=false
+    NET._replayFFTarget=0
+    NET._replaySeekPending=false
+    NET._replaySeekFrame=0
     NET._replayBannerAlpha=1
+    NET._replayEndPos=nil
+    NET._replaySettled=false
+    GAME.replaySpeed=1
 end
 
 function NET.startRankedReplay(myRep,oppRep,myUid,oppUid)
     myUid=myUid or USER.uid
-    oppUid=oppUid or (NET.rankedResult and NET.rankedResult.oppId)
-    if not myUid or not oppUid then
+    oppUid=oppUid or (NET.rankedResult and NET.rankedResult.oppId) or "opp"
+    if not myUid then
         MES.new('error',"Missing replay player info")
         LOG("startRankedReplay: missing player uids")
         return
+    end
+    if not oppRep then
+        oppRep={data="",seed=myRep.seed,setting=myRep.setting,player="Opponent"}
     end
     if not MODES.netBattle then
         MODES.netBattle=require('parts.modes.netBattle')
@@ -963,7 +1188,7 @@ function NET.startRankedReplay(myRep,oppRep,myUid,oppUid)
     GAME.modeEnv=GAME.curMode.env
     GAME.rep={}
 
-    NET._replayReps={myRep=myRep,oppRep=oppRep}
+    NET._replayReps={myRep=myRep,oppRep=oppRep,myUid=myUid,oppUid=oppUid}
     NET._replayTotal=0
     NET._replayCur=0
     NET._replayFF=false
@@ -975,6 +1200,11 @@ function NET.startRankedReplay(myRep,oppRep,myUid,oppUid)
     NET._replaySettled=false
     GAME.replaySpeed=1
 
+    -- Remember the real post-match room so we can restore it once the replay
+    -- ends, instead of leaving the fake replay room cached on the client
+    -- (which would otherwise keep the matchmaking state polluted).
+    NET._replayRoomState=NET.roomState
+
     NET.roomState={
         info={name="Ranked Replay",type="ranked",version="",description=""},
         data={},
@@ -983,16 +1213,9 @@ function NET.startRankedReplay(myRep,oppRep,myUid,oppUid)
         private=true,
         state="Playing",
     }
-    -- Remember the real post-match room so we can restore it once the replay
-    -- ends, instead of leaving the fake replay room cached on the client
-    -- (which would otherwise keep the matchmaking state polluted).
-    NET._replayRoomState=NET.roomState
     NETPLY.clear()
     -- Feed each side its own match settings as the config so the remote-env
-    -- loader has a real (non-empty) config. An empty string makes
-    -- _loadRemoteEnv emit a "Bad conf" warning (and the ZFramework error
-    -- collector then dumps the loadremoteenv/newRemotePlayer/resetGameData
-    -- stack) even though this is just a local replay with no live opponent.
+    -- loader has a real (non-empty) config.
     NETPLY.add{uid=myUid,  group=0,role='Admin', playMode='Gamer',readyMode='Playing',config=JSON.encode(myRep.setting or {})}
     NETPLY.add{uid=oppUid,group=0,role='Normal',playMode='Gamer',readyMode='Playing',config=JSON.encode(oppRep.setting or {})}
 
@@ -1004,22 +1227,6 @@ function NET.startRankedReplay(myRep,oppRep,myUid,oppUid)
     NET.inputBox.hide=true
     TASK.lock('netPlaying')
     SCN.go('net_game','fade')
-
-    -- After net_game builds the players, feed both recordings as streams.
-    TASK.new(function()
-        while #PLAYERS<2 do coroutine.yield() end
-        local myList={}  DATA.pumpRecording(myRep.data,myList)
-        local oppList={} DATA.pumpRecording(oppRep.data,oppList)
-        GAME.rep=myList
-        GAME.replaying=true
-        GAME.replaySetup=false
-        GAME.recording=false
-        -- Stream sids are mapped onto this replay's canonical NET.uid_sid values
-        -- in netBattle.load (same as live net play), so attacks route correctly.
-        PLAYERS[1]:startStreaming(myList)
-        PLAYERS[2]:startStreaming(oppList)
-        NET._replayTotal=math.max(_replayStreamLength(myList),_replayStreamLength(oppList))
-    end)
 end
 
 
@@ -1029,15 +1236,51 @@ NET.wsCallBack={}
 function NET.wsCallBack.global_getOnlineCount(body)
     NET.onlineCount=tonumber(body.data) or "_"
 end
-function NET.wsCallBack.global_chat(body)
-    USERS.getAvatar(body.data.playerId)
-    local name=USERS.getUsername(body.data.playerId)
-    if not name or #name==0 then
-        name=tostring(body.data.playerId)
+function NET.wsCallBack.server_broadcast(body)
+    local msg = (body and body.data and (body.data.message or body.data.msg)) or tostring(body and body.data or "")
+    NET._lastBroadcastTime = love.timer and love.timer.getTime() or os.time()
+    if MES and MES.new then
+        MES.new('broadcast', "[SERVER] " .. msg, 8)
     end
-    local msg=body.data.message
+    if SFX and SFX.play then
+        pcall(SFX.play, 'notify')
+    end
     if CHAT and CHAT.receiveMessage then
-        CHAT.receiveMessage(name,msg)
+        CHAT.receiveMessage("SERVER", msg)
+    end
+end
+function NET.wsCallBack.global_chat(body)
+    local pid = body and body.data and body.data.playerId
+    local msg = (body and body.data and body.data.message) or ""
+    local isBroadcast = (body and body.data and body.data.isBroadcast) or (pid == 'system') or (string.sub(msg, 1, 21) == "[SERVER ANNOUNCEMENT]")
+
+    if isBroadcast then
+        local now = love.timer and love.timer.getTime() or os.time()
+        -- Avoid duplicate toast if server_broadcast already triggered in last 1.5 seconds
+        if not NET._lastBroadcastTime or (now - NET._lastBroadcastTime > 1.5) then
+            local bannerText = msg
+            if string.sub(bannerText, 1, 21) == "[SERVER ANNOUNCEMENT]" then
+                bannerText = string.sub(bannerText, 22):match("^%s*(.-)%s*$") or string.sub(bannerText, 22)
+            end
+            if MES and MES.new then
+                MES.new('broadcast', "[SERVER] " .. bannerText, 8)
+            end
+            if SFX and SFX.play then
+                pcall(SFX.play, 'notify')
+            end
+            NET._lastBroadcastTime = now
+        end
+    end
+
+    if pid and pid ~= 'system' then
+        USERS.getAvatar(pid)
+    end
+    local name = (pid and USERS.getUsername(pid))
+    if not name or #name == 0 then
+        name = (pid == 'system' and 'SERVER' or tostring(pid or "system"))
+    end
+    if CHAT and CHAT.receiveMessage then
+        CHAT.receiveMessage(name, msg)
     end
 end
 function NET.wsCallBack.room_chat(body)
@@ -1195,12 +1438,14 @@ function NET.wsCallBack.room_remove()
 end
 function NET.wsCallBack.player_updateConf(body)
     if SCN.cur~='net_game' and SCN.cur~='net_rankedGame' then return end
-    if type(body.data)=='table' then
-        NETPLY.map[body.data.playerId].config=body.data.config
+    if type(body.data)=='table' and body.data.playerId then
+        local p=NETPLY.map[body.data.playerId]
+        if p then p.config=body.data.config end
     end
 end
 function NET.wsCallBack.player_finish(body)
     if SCN.cur~='net_game' and SCN.cur~='net_rankedGame' then return end
+    if not (body.data and body.data.playerId) then return end
     for _,P in next,PLY_ALIVE do
         if P.uid==body.data.playerId then
             NETPLY.setPlace(P.uid,#PLY_ALIVE)
@@ -1211,14 +1456,19 @@ function NET.wsCallBack.player_finish(body)
 end
 function NET.wsCallBack.player_joinGroup(body)
     if SCN.cur~='net_game' then return end
-    NETPLY.map[body.data.playerId].group=body.data.group
+    if body.data and body.data.playerId then
+        local p=NETPLY.map[body.data.playerId]
+        if p then p.group=body.data.group end
+    end
 end
 function NET.wsCallBack.player_setHost(body)
     if SCN.cur~='net_game' then return end
+    if not (body.data and body.data.playerId) then return end
     if body.data.role=='Admin' then
         MES.new('info',text.becomeHost:repD(_getFullName(body.data.playerId)))
     end
-    NETPLY.map[body.data.playerId].role=body.data.role
+    local p=NETPLY.map[body.data.playerId]
+    if p then p.role=body.data.role end
 end
 function NET.wsCallBack.player_setState(body)-- not used
 end
@@ -1234,12 +1484,18 @@ function NET.wsCallBack.player_stream(body)
 end
 function NET.wsCallBack.player_setPlayMode(body)
     if SCN.cur~='net_game' then return end
-    NETPLY.map[body.data.playerId].playMode=body.data.type
+    if body.data and body.data.playerId then
+        local p=NETPLY.map[body.data.playerId]
+        if p then p.playMode=body.data.type end
+    end
     NET.freshRoomAllReady()
 end
 function NET.wsCallBack.player_setReadyMode(body)
     if SCN.cur~='net_game' then return end
-    NETPLY.map[body.data.playerId].readyMode=body.data.isReady and 'Ready' or 'Standby'
+    if body.data and body.data.playerId then
+        local p=NETPLY.map[body.data.playerId]
+        if p then p.readyMode=body.data.isReady and 'Ready' or 'Standby' end
+    end
     NET.freshRoomAllReady()
 end
 function NET.wsCallBack.online_getPlayers(body)
@@ -1273,6 +1529,65 @@ function NET.wsCallBack.player_updateElo(body)
     end
 end
 
+function NET.wsCallBack.player_banned(body)
+    LOG("[BAN] Received suspension notice from server")
+    local reason = (body and body.data and (body.data.reason or body.data.message)) or "Violating terms of service"
+
+    -- Clear saved user session and credentials
+    USER.aToken = false
+    USER.oToken = false
+    USER.uid = false
+    saveUser()
+
+    -- Disconnect socket and disable automatic reconnection
+    NET._isReconnecting = false
+    NET._connecting = false
+    if WS.status('game') ~= 'dead' then
+        WS.close('game')
+    end
+
+    GAME.playing = false
+    if TASK.getLock('netPlaying') then
+        TASK.unlock('netPlaying')
+    end
+
+    local CARD = require'parts.userCard'
+    CARD.reset()
+
+    if SCN.cur ~= 'main' then
+        SCN.backTo('main')
+    end
+
+    local AUTH = require'parts.authModal'
+    if AUTH and AUTH.openBan then
+        AUTH.openBan(reason)
+    else
+        MES.new('error', "ACCOUNT SUSPENDED: " .. reason, 20)
+    end
+end
+
+function NET.wsCallBack.player_kicked(body)
+    LOG("[KICK] Received kick notice from server")
+    local reason = (body and body.data and (body.data.reason or body.data.message)) or "Kicked by administrator"
+
+    NET._isReconnecting = false
+    NET._connecting = false
+    if WS.status('game') ~= 'dead' then
+        WS.close('game')
+    end
+
+    GAME.playing = false
+    if TASK.getLock('netPlaying') then
+        TASK.unlock('netPlaying')
+    end
+
+    if SCN.cur ~= 'main' then
+        SCN.backTo('main')
+    end
+
+    MES.new('warn', "Kicked from server: " .. reason, 10)
+end
+
 function NET.wsCallBack.match_finish()
     if SCN.cur~='net_game' then return end
     -- Ranked matches are finalized by match_finish_ranked, which keeps the
@@ -1281,6 +1596,7 @@ function NET.wsCallBack.match_finish()
     -- so netPlaying is not unlocked early (which would briefly flash the
     -- net_game waiting room before the results scene).
     if NET.roomState.info and NET.roomState.info.type=='ranked' then return end
+    pcall(NET.saveCasualReplay)
     for _,P in next,PLAYERS do
         NETPLY.setStat(P.uid,P.stat)
     end
@@ -1428,7 +1744,10 @@ function NET.wsCallBack.match_finish_ranked(body)
         }
 
         -- Best-effort: upload this player's replay into the match folder.
-        if matchId then NET.uploadRankedReplay(matchId) end
+        if matchId then
+            NET.uploadRankedReplay(matchId)
+            if oppId then NET.saveRankedReplays(matchId, oppId) end
+        end
 
         -- Report this match to the history endpoint so it shows on the profile.
         NET.reportHistory({
@@ -1551,8 +1870,38 @@ function NET.triggerReconnect()
     end)
 end
 
+function NET.verifyVersion(cb)
+    TASK.new(function()
+        local res = getMsg({
+            pool = 'versionCheck',
+            url = AUTHHOST,
+            path = '/api/version',
+            silentError = true,
+        }, 5)
+
+        if res and res.code == 200 and res.data then
+            local data = res.data
+            NET.serverVersion = data.version
+            NET.minClientVersion = data.minClientVersion
+            NET.minRoomVersion = data.minRoomVersion
+
+            local mismatch = false
+            if data.minRoomVersion and VERSION and VERSION.room and data.minRoomVersion ~= VERSION.room then
+                mismatch = true
+                MES.new('warn', ("Server room engine (%s) differs from client (%s)"):format(data.minRoomVersion, VERSION.room), 8)
+            end
+
+            LOG("[VERSION] Verified with server: serverVer=" .. tostring(data.version) .. " clientVer=" .. tostring(VERSION and VERSION.string) .. (mismatch and " [MISMATCH]" or " [OK]"))
+            if cb then cb(true, data, mismatch) end
+            return
+        end
+        if cb then cb(false) end
+    end)
+end
+
 function NET.startupConnect()
     TASK.new(function()
+        NET.verifyVersion()
         if USER.aToken and not USER.oToken then
             USER.oToken = USER.aToken
         elseif USER.oToken and not USER.aToken then
@@ -1577,7 +1926,12 @@ function NET.ws_connect(force)
             WS.close('game')
         end
         NET._connecting = true
-        WS.connect('game','',{['x-access-token']=tok},6)
+        local headers = {
+            ['x-access-token'] = tok,
+            ['x-client-version'] = tostring(VERSION and VERSION.string or ""),
+            ['x-room-version'] = tostring(VERSION and VERSION.room or ""),
+        }
+        WS.connect('game','',headers,6)
         TASK.removeTask_code(NET.ws_update)
         TASK.new(NET.ws_update)
     end
@@ -1593,7 +1947,7 @@ function NET.ws_update()
         TEST.yieldT(1/26)
         if WS.status('game')=='dead' then
             NET._connecting = false
-            if (SCN.cur == 'net_game' or SCN.cur == 'net_rankedGame') and TASK.getLock('netPlaying') then
+            if not GAME.replaying and (SCN.cur == 'net_game' or SCN.cur == 'net_rankedGame') and TASK.getLock('netPlaying') then
                 TEST.yieldUntilNextScene()
                 GAME.playing=false
                 MES.new('warn', "Connection lost during match", 5)
@@ -1608,6 +1962,7 @@ function NET.ws_update()
         elseif WS.status('game')=='running' then
             NET._connecting = false
             NET._isReconnecting = false
+            NET.serverDown = false
             reconnectAttempts = 0
             break
         end
@@ -1660,7 +2015,7 @@ function NET.ws_update()
         TEST.yieldT(.01)-- Network messages, max 126 FPS is enough
 
         if WS.status('game')=='dead' then
-            if (SCN.cur == 'net_game' or SCN.cur == 'net_rankedGame') and TASK.getLock('netPlaying') then
+            if not GAME.replaying and (SCN.cur == 'net_game' or SCN.cur == 'net_rankedGame') and TASK.getLock('netPlaying') then
                 TEST.yieldUntilNextScene()
                 GAME.playing=false
                 MES.new('warn', "Connection lost during match", 5)
@@ -1834,8 +2189,8 @@ function NET.loadSavedData(sections)
             if not saveFile(VK_ORG,'conf/virtualkey') then fail=true end
         end
 
-        if #cloudData.vkSave1[1] and not saveFile(cloudData.vkSave1,'conf/vkSave1') then fail=true end
-        if #cloudData.vkSave2[1] and not saveFile(cloudData.vkSave2,'conf/vkSave2') then fail=true end
+        if cloudData.vkSave1 and cloudData.vkSave1[1] and #cloudData.vkSave1[1] and not saveFile(cloudData.vkSave1,'conf/vkSave1') then fail=true end
+        if cloudData.vkSave2 and cloudData.vkSave2[1] and #cloudData.vkSave2[1] and not saveFile(cloudData.vkSave2,'conf/vkSave2') then fail=true end
     until true
 
     if fail then
@@ -1853,20 +2208,17 @@ function NET.reportPlayer(data, cb)
 
     -- Priority 1: WebSocket if game connection is active
     if WS.status('game') == 'running' then
-        WS.send('game', {
-            action = 1321, -- actionReportPlayer
-            data = {
-                reported_uid = tostring(data.reported_uid),
-                reported_username = tostring(data.reported_username or ""),
-                reason = tostring(data.reason or "other"),
-                details = tostring(data.details or ""),
-                room_id = tostring(data.room_id or ""),
-                match_id = tostring(data.match_id or ""),
-                client_meta = {
-                    reporter_uid = tostring(USER and USER.uid or ""),
-                    client_version = tostring(VERSION and VERSION.room or ""),
-                    time = os.time(),
-                }
+        wsSend(1321, {
+            reported_uid = tostring(data.reported_uid),
+            reported_username = tostring(data.reported_username or ""),
+            reason = tostring(data.reason or "other"),
+            details = tostring(data.details or ""),
+            room_id = tostring(data.room_id or ""),
+            match_id = tostring(data.match_id or ""),
+            client_meta = {
+                reporter_uid = tostring(USER and USER.uid or ""),
+                client_version = tostring(VERSION and VERSION.room or ""),
+                time = os.time(),
             }
         })
         if cb then cb(true, "sent_via_ws") end
@@ -1884,10 +2236,10 @@ function NET.reportPlayer(data, cb)
 
     HTTP({
         pool = 'report',
-        type = 'post',
+        method = 'POST',
         url = baseWeb .. "/api/report",
-        header = headers,
-        body = JSON._encode({
+        headers = headers,
+        body = JSON.encode({
             reported_uid = tostring(data.reported_uid),
             reported_username = tostring(data.reported_username or ""),
             reason = tostring(data.reason or "other"),

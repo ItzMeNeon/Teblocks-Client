@@ -19,6 +19,7 @@ local password=""
 local verifyCode=""
 local verifyTargetId=""
 local verifyTargetName=""
+local banReasonText=""
 local focusedField="username"
 
 local function _close()
@@ -34,6 +35,7 @@ local function _close()
     verifyCode=""
     verifyTargetId=""
     verifyTargetName=""
+    banReasonText=""
     focusedField="username"
     love.keyboard.setTextInput(false)
     WIDGET.unFocus(true)
@@ -138,6 +140,17 @@ function AUTH.openVerify(uid, uname)
     love.keyboard.setTextInput(true)
 end
 
+function AUTH.openBan(reason)
+    if _isOpen then _close() end
+    banReasonText = tostring(reason or "Violating terms of service")
+    AUTH.mode = 'ban'
+    AUTH.prevActive = WIDGET.active
+    AUTH.widgets = {}
+    _isOpen = true
+    AUTH.openTimer = 0.35
+    love.keyboard.setTextInput(false)
+end
+
 function AUTH._submit()
     if #username==0 or #password==0 then
         MES.new('error', text.noUsername or 'Please enter username and password')
@@ -224,7 +237,29 @@ function AUTH.draw()
         gc_setLineWidth(2)
         gc_rectangle('line',x,y,w,h,10)
 
-        if AUTH.mode=='verify' then
+        if AUTH.mode=='ban' then
+            setFont(38)
+            gc_setColor(1,.25,.25,AUTH.boxAlpha)
+            gc_print('Account Suspended',320,150)
+
+            setFont(18)
+            gc_setColor(.9,.9,.9,AUTH.boxAlpha)
+            gc_print("Your account has been suspended by an administrator.",320,210)
+
+            setFont(16)
+            gc_setColor(.7,.7,.7,AUTH.boxAlpha)
+            gc_print("Reason:",320,260)
+
+            setFont(22)
+            gc_setColor(1,.6,.6,AUTH.boxAlpha)
+            gc_print(banReasonText~="" and banReasonText or "Violating terms of service",320,295)
+
+            setFont(15)
+            gc_setColor(.6,.6,.6,AUTH.boxAlpha)
+            gc_print("If you believe this suspension is in error, contact support.",320,365)
+
+            _drawButton(500,425,280,55,'Acknowledge','lR')
+        elseif AUTH.mode=='verify' then
             setFont(38)
             gc_setColor(COLOR.Z[1],COLOR.Z[2],COLOR.Z[3],AUTH.boxAlpha)
             gc_print('Verify Account',320,150)
@@ -266,7 +301,13 @@ function AUTH.mouseClick(x,y)
 
     love.keyboard.setTextInput(true)
 
-    if AUTH.mode=='verify' then
+    if AUTH.mode=='ban' then
+        if _pointInRect(x,y,500-8,425-8,280+16,55+16) then
+            _close()
+            return true
+        end
+        return true
+    elseif AUTH.mode=='verify' then
         local fx,fy,fw,fh=_getFieldRect('verifyCode')
         if fx and _pointInRect(x,y,fx-6,fy-6,fw+12,fh+12) then
             focusedField='verifyCode'

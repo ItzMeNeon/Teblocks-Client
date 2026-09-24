@@ -295,7 +295,7 @@ scene.widgetList = {
         color  = 'lO',
         font   = 24,
         fText  = CHAR.icon.settings,
-        code   = goScene'setting_game',
+        code   = function() if SETTINGS then SETTINGS.toggle() end end,
     },
     WIDGET.newButton{
         name   = 'lang',

@@ -246,7 +246,9 @@ end
 function love.mousepressed(x,y,k,touch)
     if touch or WAIT.state then return end
     mouseShow=true
+    if SETTINGS and SETTINGS.mouseClick and SETTINGS.mouseClick(x,y,k) then return end
     if MES.mouseDown and MES.mouseDown(x,y,k) then return end
+    if CHAT and CHAT.mouseClick and CHAT.mouseClick(x,y,k) then return end
     mx,my=ITP(xOy,x,y)
     if debugMode==1 then
         print(("(%d,%d)<-%d,%d ~~(%d,%d)<-%d,%d"):format(
@@ -266,11 +268,13 @@ function love.mousemoved(x,y,dx,dy,touch)
     if touch then return end
     mouseShow=true
     if MES.mouseMove then MES.mouseMove(x,y,dx,dy) end
+    if CHAT and CHAT.mouseMove then CHAT.mouseMove(x,y) end
     mx,my=ITP(xOy,x,y)
     _updateMousePos(mx,my,dx,dy)
 end
 function love.mousereleased(x,y,k,touch)
     if touch or WAIT.state or SCN.swapping then return end
+    if SETTINGS and SETTINGS.mouseUp and SETTINGS.mouseUp(x,y,k) then return end
     if MES.mouseUp and MES.mouseUp(x,y,k) then return end
     mx,my=ITP(xOy,x,y)
     if SCN.mouseUp then SCN.mouseUp(mx,my,k) end
@@ -286,6 +290,9 @@ function love.wheelmoved(x,y)
     if math.abs(x)>=100 then x=x/100 end
     if math.abs(y)>=100 then y=y/100 end
     if WAIT.state or SCN.swapping then return end
+    if SETTINGS and SETTINGS.wheelMoved and SETTINGS.wheelMoved(x,y) then return end
+    if MES.wheelMoved and MES.wheelMoved(x,y) then return end
+    if CHAT and CHAT.wheelMoved and CHAT.wheelMoved(x,y) then return end
     if SCN.wheelMoved then
         SCN.wheelMoved(x,y)
     else
@@ -335,8 +342,9 @@ end
 
 local globalKey={
     f8=function()
-        debugMode=1
-        MES.new('info',"DEBUG ON",.2)
+        if CHAT and CHAT.toggle then
+            CHAT.toggle()
+        end
     end
 }
 local fnKey={NULL,NULL,NULL,NULL,NULL,NULL,NULL}
@@ -347,8 +355,8 @@ local function debugKeyPressed(key)
     elseif key=='f4' then  fnKey[4]()
     elseif key=='f5' then  fnKey[5]()
     elseif key=='f6' then  fnKey[6]()
-    elseif key=='f7' then  fnKey[7]()
-    elseif key=='f8' then  debugMode=nil MES.new('info',"DEBUG OFF",.2)
+    elseif key=='f7' then  if METRICS and METRICS.toggle then METRICS.toggle() else fnKey[7]() end
+    elseif key=='f8' then  if CHAT and CHAT.toggle then CHAT.toggle() end
     elseif key=='f9' then  debugMode=1   MES.new('info',"DEBUG 1")
     elseif key=='f10' then debugMode=2   MES.new('info',"DEBUG 2")
     elseif key=='f11' then debugMode=3   MES.new('info',"DEBUG 3")
@@ -378,6 +386,10 @@ local function debugKeyPressed(key)
 end
 function love.keypressed(key,_,isRep)
     mouseShow=false
+    if SETTINGS and SETTINGS.keyDown and SETTINGS.keyDown(key,isRep) then return end
+    if METRICS and METRICS.keyDown and METRICS.keyDown(key) then return end
+    if CHAT and CHAT.keyDown and CHAT.keyDown(key,isRep) then return end
+    if MES and MES.keyDown and MES.keyDown(key,isRep) then return end
     if debugMode and debugKeyPressed(key) then
         -- Do nothing
     elseif globalKey[key] then
@@ -421,6 +433,7 @@ function love.textedited(texts)
     EDITING=texts
 end
 function love.textinput(texts)
+    if CHAT and CHAT.textInput and CHAT.textInput(texts) then return end
     if SCN.textInput then
         SCN.textInput(texts)
         return
@@ -719,12 +732,19 @@ function love.run()
         SCN.init('load')
     end
 
+    local tickAccum = 0
+    local TICK_STEP = 1/60
+    local MAX_TICKS = 6
+
     return function()
         local _
 
         local time=timer()
         local dt=time-lastFrame
         lastFrame=time
+
+        -- Cap dt to prevent spiral of death on long pauses/window drags
+        if dt > 0.25 then dt = 0.25 end
 
         -- EVENT
         PUMP()
@@ -742,7 +762,7 @@ function love.run()
             end
         end
 
-        -- UPDATE
+        -- Frame rate independent updates (Input, UI, Network, Metrics)
         STEP()
         if SYSTEM == 'Web' then
             JS.retrieveData(dt)
@@ -750,18 +770,31 @@ function love.run()
         end
         if mouseShow then mouse_update(dt) end
         if next(jsState) then gp_update(jsState[1],dt) end
-        VOC.update()
-        BG.update(dt)
-        TEXT_update(dt)
-        WAIT.update(dt)
-        MES_update(dt)
         HTTP_update(dt)
         WS_update(dt)
-        TASK_update(dt)
-        SYSFX_update(dt)
-        if SCN.update then SCN.update(dt) end
-        if SCN.swapping then SCN.swapUpdate(dt) end
-        WIDGET_update(dt)
+        if CHAT and CHAT.update then CHAT.update(dt) end
+        if METRICS and METRICS.update then METRICS.update(dt) end
+        if SETTINGS and SETTINGS.update then SETTINGS.update(dt) end
+
+        -- Fixed 60Hz Game & Simulation Ticks (Prevents speedup when running at uncapped FPS)
+        tickAccum = tickAccum + dt
+        local ticks = 0
+        while tickAccum >= TICK_STEP and ticks < MAX_TICKS do
+            tickAccum = tickAccum - TICK_STEP
+            ticks = ticks + 1
+
+            VOC.update()
+            BG.update(TICK_STEP)
+            TEXT_update(TICK_STEP)
+            WAIT.update(TICK_STEP)
+            MES_update(TICK_STEP)
+            TASK_update(TICK_STEP)
+            SYSFX_update(TICK_STEP)
+            if SCN.update then SCN.update(TICK_STEP) end
+            if SCN.swapping then SCN.swapUpdate(TICK_STEP) end
+            WIDGET_update(TICK_STEP)
+        end
+        if tickAccum >= TICK_STEP then tickAccum = 0 end
 
         -- DRAW
         if not MINI() then
@@ -786,6 +819,8 @@ function love.run()
                     if showPowerInfo then
                         gc.translate(0,27)
                     end
+                    if SETTINGS and SETTINGS.draw then SETTINGS.draw() end
+                    if CHAT and CHAT.draw then CHAT.draw() end
                     MES_draw()
                 gc_replaceTransform(SCR.origin)
                     -- Draw power info.
@@ -808,10 +843,14 @@ function love.run()
                 gc_replaceTransform(SCR.xOy_dl)
                     local safeX=SCR.safeX/SCR.k
 
-                    -- Draw FPS
-                    FONT.set(15)
-                    gc_setColor(1,1,1)
-                    gc_print(FPS(),safeX+5,-20)
+                    -- Draw Performance Metrics / FPS (Bottom-Left)
+                    if METRICS and METRICS.draw and METRICS.mode > 0 then
+                        METRICS.draw()
+                    else
+                        FONT.set(15)
+                        gc_setColor(1,1,1)
+                        gc_print(FPS(),safeX+5,-20)
+                    end
 
                     -- Debug info.
                     if debugMode then
@@ -890,9 +929,11 @@ function love.run()
             end
         end
 
-        _=timer()-lastFrame
-        if _<sleepInterval*.9626 then SLEEP(sleepInterval*.9626-_) end
-        while timer()-lastFrame<sleepInterval do end
+        if sleepInterval > 0 then
+            _=timer()-lastFrame
+            if _<sleepInterval*.9626 then SLEEP(sleepInterval*.9626-_) end
+            while timer()-lastFrame<sleepInterval do end
+        end
     end
 end
 
@@ -912,7 +953,13 @@ end
 function Z.setPowerInfo(bool) showPowerInfo=bool end
 function Z.setCleanCanvas(bool) discardCanvas=bool end
 function Z.setFrameMul(n) frameMul=n end
-function Z.setMaxFPS(fps) sleepInterval=1/fps end
+function Z.setMaxFPS(fps)
+    if not fps or fps == 'unlimited' or fps == 0 or (type(fps) == 'number' and fps >= 1000) then
+        sleepInterval = 0
+    else
+        sleepInterval = 1 / tonumber(fps)
+    end
+end
 function Z.setClickFX(bool) showClickFX=bool end
 
 --[Warning] Color and line width is uncertain value, set it in the function.

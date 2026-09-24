@@ -20,7 +20,11 @@ do-- Connect
     local ok,connErr=pcall(function()
         SOCK:settimeout(timeout)
         local res,err=SOCK:connect(host,port)
-        if not res then error(err or "Connection failed") end
+        if not res then
+            pcall(function() SOCK:close() end)
+            CHN_push(readCHN,{status='error',code=0,serverDown=true,reason="serverDown"})
+            return
+        end
 
         SOCK:setoption('tcp-nodelay',true)
         SOCK:setoption('keepalive',true)
@@ -39,7 +43,11 @@ do-- Connect
 
         -- First line of HTTP
         res,err=SOCK:receive('*l')
-        if not res then error(err or "No response from server") end
+        if not res then
+            pcall(function() SOCK:close() end)
+            CHN_push(readCHN,{status='error',code=0,serverDown=true,reason="serverDown"})
+            return
+        end
         local code,ctLen
         code=res:find(' ')
         code=res:sub(code+1,code+3)
@@ -47,7 +55,11 @@ do-- Connect
         -- Get body length from headers and remove headers
         repeat
             res,err=SOCK:receive('*l')
-            if not res then error(err or "Header read error") end
+            if not res then
+                pcall(function() SOCK:close() end)
+                CHN_push(readCHN,{status='error',code=0,serverDown=true,reason="serverDown"})
+                return
+            end
             if not ctLen and res:lower():find('content%-length') then
                 ctLen=tonumber(res:match('%d+')) or 0
             end
@@ -56,7 +68,11 @@ do-- Connect
         -- Result
         if code=='101' then
             CHN_push(readCHN,'success')
+            SOCK:settimeout(0)
+            return
         else
+            local cNum=tonumber(code)
+            local isDown=not cNum or cNum==530 or cNum>=500 or cNum~=200
             local body=""
             if ctLen and ctLen>0 then
                 body=SOCK:receive(ctLen) or ""
@@ -66,16 +82,20 @@ do-- Connect
             if okParsed and type(parsed)=='table' and parsed.reason then
                 reason=parsed.reason
             end
-            if reason=="" then reason="HTTP status "..tostring(code) end
-            error((code or "XXX")..":"..reason)
+            pcall(function() SOCK:close() end)
+            CHN_push(readCHN,{
+                status='error',
+                code=cNum or code,
+                serverDown=isDown,
+                reason=isDown and "serverDown" or (reason~="" and reason or ("HTTP "..tostring(code))),
+            })
+            return
         end
-
-        SOCK:settimeout(0)
     end)
 
     if not ok then
-        CHN_push(readCHN,tostring(connErr))
         pcall(function() SOCK:close() end)
+        CHN_push(readCHN,{status='error',code=0,serverDown=true,reason="serverDown"})
         return
     end
 end

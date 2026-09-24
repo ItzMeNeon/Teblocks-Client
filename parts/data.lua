@@ -358,7 +358,8 @@ function DATA.parseReplayData(fileName,fileData,ifFull)
 
     -- Convert ancient replays
     metaData.mode=MODE_UPDATE_MAP[metaData.mode] or metaData.mode
-    if not MODES[metaData.mode] then return rep end-- goto BREAK_cannotParse
+    local isNetMode=(metaData.mode=='netBattle') or (type(metaData.mode)=='string' and metaData.mode:find('^net'))
+    if not (MODES[metaData.mode] or isNetMode) then return rep end-- goto BREAK_cannotParse
 
     -- Create replay object
     rep={
@@ -374,6 +375,18 @@ function DATA.parseReplayData(fileName,fileData,ifFull)
         setting=metaData.setting,
         mod=metaData.mod,
         tasUsed=metaData.tasUsed,
+
+        -- Multiplayer and rich metadata fields
+        netType=metaData.netType,
+        matchId=metaData.matchId,
+        opponent=metaData.opponent,
+        opponentId=metaData.opponentId,
+        roomName=metaData.roomName,
+        result=metaData.result,
+        myScore=metaData.myScore,
+        oppScore=metaData.oppScore,
+        oppStream=metaData.oppStream,
+        duration=metaData.duration,
     }
     if ifFull then rep.data=fileData end
     if metaData.private then

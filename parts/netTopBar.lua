@@ -203,6 +203,9 @@ function NET_BAR.draw(subtitle, backLabel)
         if NET and NET.ping then
             countStr = countStr .. " (" .. NET.ping .. "ms)"
         end
+    elseif NET and NET.serverDown then
+        gc_setColor(.85, .3, .3, dotAlpha)
+        countStr = "Server Down"
     elseif NET and (NET._isReconnecting or NET._reconnectCountdown) then
         gc_setColor(.95, .75, .2, dotAlpha)
         countStr = "Reconnecting..."

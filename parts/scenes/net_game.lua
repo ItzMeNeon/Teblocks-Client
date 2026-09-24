@@ -39,18 +39,18 @@ local noTouch,noKey=false,false
 local touchMoveLastFrame=false
 
 local function _replayFinished()
+    if #PLAYERS<2 then return false end
+    local anyStream=false
     for p=1,#PLAYERS do
         local P=PLAYERS[p]
-        -- A player is still "live" only if they are alive and still have an
-        -- unconsumed recording entry. Once a player tops out their stream stops
-        -- being advanced (they are dead), leaving streamProgress on a valid entry
-        -- that would otherwise make this report false forever, so dead players
-        -- count as finished.
-        if P.alive and P.stream and P.stream[P.streamProgress] then
-            return false
+        if P.stream and P.streamProgress then
+            anyStream=true
+            if P.alive and P.stream[P.streamProgress] then
+                return false
+            end
         end
     end
-    return true
+    return anyStream
 end
 
 -- _stepPlayers runs the per-player fixed-step update loop. When the rollback
@@ -62,16 +62,7 @@ local function _stepPlayers(dt)
     for p=1,#PLAYERS do PLAYERS[p]:update(dt) end
 end
 local function _replaySeekTo(frame)
-    if frame<NET._replayCur then
-        -- Backward seek: re-simulate from frame 0 and fast-forward to the target.
-        NET.seekRankedReplay(frame)
-    else
-        -- Forward seek: just keep playing (fast-forward) from the current frame.
-        NET._replayFF=true
-        NET._replayFFTarget=frame
-    end
-    NET._replayEndPos=nil
-    NET._replaySettled=false
+    NET.seekReplay(frame)
 end
 -- Once the replay ends the survivor is laid out at the full-size centred 1P
 -- position (its board bottom would sit under the seek bar at y>=664). Scale it
@@ -88,48 +79,45 @@ local function _replaySettleLayout()
     end
 end
 local function _replayUpdate(dt)
-    -- Apply a pending seek. Honored even while paused so a frozen replay can
-    -- still be scrubbed. Debounced until the user pauses dragging.
-    if NET._replaySeekPending and (not WIDGET.sel or WIDGET.sel.type~='slider' or love.timer.getTime()-NET._replaySeekLast>0.2) then
-        _replaySeekTo(NET._replaySeekFrame)
+    -- Apply pending seek immediately
+    if NET._replaySeekPending then
+        NET.seekReplay(NET._replaySeekFrame)
         NET._replaySeekPending=false
     end
-    if NET._replayFF then
-        -- Fast-forward to the seek target, capped per frame so a long jump
-        -- spreads across a few frames instead of freezing the client.
-        local cap=400
-        while NET._replayFF and cap>0 do
-            _stepPlayers(dt)
-            cap=cap-1
-            if _replayFinished() or (NET._replayFFTarget>0 and PLAYERS[1].frameRun>=NET._replayFFTarget) then
-                NET._replayFF=false
-                break
-            end
-        end
-    elseif not paused then
+
+    if not paused then
         local steps=GAME.replaySpeed or 1
+        local SNAPSHOT=require('parts.player.snapshot')
         for s=1,steps do
             _stepPlayers(dt)
+            local curF=PLAYERS[1] and PLAYERS[1].frameRun
+            if curF and curF%60==0 and NET._replayKeyframes and not NET._replayKeyframes[curF] then
+                local kSnap={players={}}
+                for p=1,#PLAYERS do
+                    kSnap.players[p]=SNAPSHOT.snapshot(PLAYERS[p])
+                end
+                NET._replayKeyframes[curF]=kSnap
+            end
             if _replayFinished() then break end
         end
     end
-    -- Track the current frame for the seek bar.
+
+    -- Track current frame for seek bar
     NET._replayCur=0
     for p=1,#PLAYERS do
         if PLAYERS[p].frameRun>NET._replayCur then NET._replayCur=PLAYERS[p].frameRun end
     end
-    -- The REPLAY banner fades out once the replay ends and fades back in when
-    -- the user seeks away from the end.
+
+    -- The REPLAY banner fades out once replay ends
     NET._replayBannerAlpha=MATH.expApproach(NET._replayBannerAlpha,_replayFinished() and 0 or 1,dt*4)
-    -- When the replay ends, snapshot each board's end-of-replay position/size so
-    -- a later backward seek can animate it back into place instead of popping in.
+
+    -- When replay ends, snapshot end positions
     if _replayFinished() and not NET._replayEndPos then
         NET._replayEndPos={}
         for p=1,#PLAYERS do
             local P=PLAYERS[p]
             if P.uid then NET._replayEndPos[P.uid]={P.x,P.y,P.size} end
         end
-        -- Shrink the surviving board(s) so they clear the seek bar.
         if not NET._replaySettled then
             NET._replaySettled=true
             _replaySettleLayout()
@@ -138,7 +126,8 @@ local function _replayUpdate(dt)
 end
 
 local function _setCancel()
-    if NETPLY.map[USER.uid].playMode=='Gamer' then
+    local myP = NETPLY.map[USER.uid]
+    if myP and myP.playMode=='Gamer' then
         NET.player_setReady(false)
     else
         NET.player_setPlayMode('Gamer')
@@ -380,16 +369,46 @@ function scene.keyDown(key,isRep)
         end
     end
 
-    if GAME.replaying and paused then
-        if key=='escape' then paused=false return end
-        if key=='q' then _quit() return end
-        return
-    end
-    if GAME.replaying and playing and key=='space' then paused=not paused return end
-    if key=='escape' then
-        if GAME.replaying then
+    if GAME.replaying then
+        if key=='space' or key=='p' then
             paused=not paused
-        elseif NET.matchFoundPending and NET.matchFoundCountdown>0 then
+            if scene.widgetList and scene.widgetList.replayPlayToggle and scene.widgetList.replayPlayToggle.setText then
+                scene.widgetList.replayPlayToggle:setText(paused and CHAR.icon.play or CHAR.icon.pause)
+            end
+            return
+        elseif key=='left' then
+            local step=love.keyboard.isDown('lshift','rshift') and 60 or 300
+            NET.seekReplay(NET._replayCur - step)
+            return
+        elseif key=='right' then
+            local step=love.keyboard.isDown('lshift','rshift') and 60 or 300
+            NET.seekReplay(NET._replayCur + step)
+            return
+        elseif key=='home' then
+            NET.seekReplay(0)
+            return
+        elseif key=='end' then
+            NET.seekReplay(NET._replayTotal or NET._replayCur)
+            return
+        elseif key=='up' then
+            local spds={1,2,5,10}
+            for _,s in ipairs(spds) do
+                if s>(GAME.replaySpeed or 1) then GAME.replaySpeed=s break end
+            end
+            return
+        elseif key=='down' then
+            local spds={10,5,2,1}
+            for _,s in ipairs(spds) do
+                if s<(GAME.replaySpeed or 1) then GAME.replaySpeed=s break end
+            end
+            return
+        elseif key=='escape' or key=='q' then
+            _quit()
+            return
+        end
+    end
+    if key=='escape' then
+        if NET.matchFoundPending and NET.matchFoundCountdown>0 then
             NET.matchFoundPending=false
             NET.matchFoundCountdown=0
             NET.matchFoundSeed=nil
@@ -503,7 +522,8 @@ function scene.keyDown(key,isRep)
         end
     elseif not playing then
         if key=='space' then
-            if NETPLY.map[USER.uid].playMode=='Spectator' or NETPLY.map[USER.uid].readyMode=='Ready' then
+            local myP = NETPLY.map[USER.uid]
+            if myP and (myP.playMode=='Spectator' or myP.readyMode=='Ready') then
                 _setCancel()
             else
                 (kb.isDown('lctrl','rctrl','lalt','ralt') and _setSpectate or _setReady)()
@@ -628,7 +648,10 @@ function scene.update(dt)
                     p.place=1e99
                 end
             end
-            NET.spectate=PLAYERS[1].uid~=USER.uid
+            NET.spectate=PLAYERS[1] and (PLAYERS[1].uid~=USER.uid)
+            if GAME.replaying then
+                NET._initReplayStreams()
+            end
             if NET.storedStream then
                 for i=1,#NET.storedStream do
                     NET.pumpStream(NET.storedStream[i])
@@ -666,14 +689,18 @@ function scene.draw()
             setFont(GAME.replaying and 18 or 25)
             for p=1,#PLAYERS do
                 local P=PLAYERS[p]
-                if not P then
-                    print(("[net_game] nil PLAYERS[%d] during draw"):format(p))
-                elseif not P.fieldY then
-                    print(("[net_game] unpositioned player id=%d uid=%s type=%s fieldY=%s centerX=%s"):format(P.id, tostring(P.uid), tostring(P.type), tostring(P.fieldY), tostring(P.centerX)))
+                if P and P.fieldY then
+                    local isYou=P.uid==USER.uid
+                    local label
+                    if GAME.replaying then
+                        label=(P.username and #P.username>0) and P.username or (isYou and "YOU" or ("PLAYER "..p))
+                        gc_setColor(p==1 and COLOR.lY or COLOR.lC)
+                    else
+                        label=isYou and "YOU" or (P.username or "OPPONENT")
+                        gc_setColor(isYou and COLOR.lY or COLOR.lR)
+                    end
+                    mStr(label, P.centerX or 0, (P.fieldY or 0)-72)
                 end
-                local isYou=P and P.uid==USER.uid
-                gc_setColor(isYou and COLOR.lY or COLOR.lR)
-                mStr(isYou and "YOU" or (P.username or "OPPONENT"), P.centerX or 0, (P.fieldY or 0)-72)
             end
         end
 
@@ -693,14 +720,22 @@ function scene.draw()
 
             -- Media-player style seek bar backdrop, so the slider/buttons don't
             -- clash with the boards behind them.
-            gc_setColor(0,0,0,.5)
-            gc.rectangle('fill',20,664,1240,56,6)
+            gc_setColor(0,0,0,.65)
+            gc.rectangle('fill',20,664,1240,56,8)
+            gc_setColor(1,1,1,.15)
+            gc.rectangle('line',20,664,1240,56,8)
 
-            -- Current / total frame readout, left of the slider.
+            -- Current / total time and frame readout, right of slider.
             if NET._replayTotal and NET._replayTotal>0 then
-                setFont(20)
-                gc_setColor(COLOR.lY[1],COLOR.lY[2],COLOR.lY[3],1)
-                gc_print(("%d / %d"):format(NET._replayCur,NET._replayTotal),30,678)
+                local curS=math.floor((NET._replayCur or 0)/60)
+                local totS=math.floor((NET._replayTotal or 0)/60)
+                local timeStr=("%02d:%02d / %02d:%02d"):format(math.floor(curS/60),curS%60,math.floor(totS/60),totS%60)
+                setFont(18)
+                gc_setColor(COLOR.lY)
+                gc_print(timeStr,1080,672)
+                setFont(13)
+                gc_setColor(.7,.8,.9)
+                gc_print(("%d / %d f"):format(NET._replayCur or 0,NET._replayTotal or 0),1080,695)
             end
 
         end
@@ -711,7 +746,7 @@ function scene.draw()
             love.graphics.rectangle('fill',0,0,1280,720)
         end
 
-        if NET.spectate then
+        if NET.spectate and not GAME.replaying then
             setFont(30)
             gc_setColor(.2,1,0,.8)
             gc_print(text.spectating,940,0)
@@ -723,7 +758,7 @@ function scene.draw()
         -- 1. Ambient Background Particles
         NET_BAR.drawBG()
 
-        local myP = NETPLY.map[USER.uid]
+        local myP = rawget(NETPLY.map, USER.uid)
         local isMatchPlaying = NET.roomState and NET.roomState.state == 'Playing'
         local roomCap = (NET.roomState and NET.roomState.capacity) or 4
         local roomName = (NET.roomState and NET.roomState.info and NET.roomState.info.name) or "CASUAL ROOM"
@@ -1089,7 +1124,16 @@ scene.widgetList={
     WIDGET.newKey{name='replaySpd2',  x=170,y=50, w=60, font=40, fText=CHAR.icon.speedTwo,  code=function() GAME.replaySpeed=2  end,                                                                                       hideF=function() return not GAME.replaying end},
     WIDGET.newKey{name='replaySpd5',  x=235,y=50, w=60, font=40, fText=CHAR.icon.speedFive, code=function() GAME.replaySpeed=5  end,                                                                                       hideF=function() return not GAME.replaying end},
     WIDGET.newKey{name='replaySpd10', x=300,y=50, w=60, font=30, fText="10x",               code=function() GAME.replaySpeed=10 end,                                                                                       hideF=function() return not GAME.replaying end},
-    WIDGET.newSlider{name='replaySeek',x=160,y=683,w=1020,axis={0,1,false},disp=function() return (NET._replayTotal and NET._replayTotal>0) and NET._replayCur/NET._replayTotal or 0 end,code=function(v) NET._replaySeekFrame=math.floor(v*(NET._replayTotal or 1)); NET._replaySeekPending=true; NET._replaySeekLast=love.timer.getTime() end,hideF=function() return not GAME.replaying end},
+
+    WIDGET.newKey{name='replayBack5', x=35, y=672, w=52, font=20, fText="-5s",              code=function() NET.seekReplay((NET._replayCur or 0)-300) end,                                                                hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replayPlayToggle',x=95,y=672,w=52,font=32,fText=CHAR.icon.pause,code=function()
+        paused=not paused
+        if scene.widgetList and scene.widgetList.replayPlayToggle and scene.widgetList.replayPlayToggle.setText then
+            scene.widgetList.replayPlayToggle:setText(paused and CHAR.icon.play or CHAR.icon.pause)
+        end
+    end,hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replayFwd5',  x=155,y=672, w=52, font=20, fText="+5s",              code=function() NET.seekReplay((NET._replayCur or 0)+300) end,                                                                hideF=function() return not GAME.replaying end},
+    WIDGET.newSlider{name='replaySeek',x=225,y=683,w=840,axis={0,1,false},disp=function() return (NET._replayTotal and NET._replayTotal>0) and (NET._replayCur or 0)/NET._replayTotal or 0 end,code=function(v) local f=math.floor(v*(NET._replayTotal or 1)); NET.seekReplay(f) end,hideF=function() return not GAME.replaying end},
 }
 
 function scene.overDraw()

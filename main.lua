@@ -127,6 +127,9 @@ TEXTURE=require'parts.texture'
 SKIN   =require'parts.skin'
 USERS  =require'parts.users'
 NET    =require'parts.net'
+CHAT   =require'parts.globalChat'
+METRICS=require'parts.metrics'
+SETTINGS=require'parts.settingsSidebar'
 VK     =require'parts.virtualKey'
 BOT    =require'parts.bot'
 RSlist =require'parts.RSlist'; DSCP=RSlist.TRS.centerPos
@@ -404,14 +407,14 @@ do
                 RANKS[v]=RANKS[k]
                 RANKS[k]=nil
             end
-            k='record/'..k
-            if fs.getInfo(k..'.dat') then
-                fs.write('record/'..v..'.rec',fs.read(k..'.dat'))
-                fs.remove(k..'.dat')
+            local recPath='record/'..k
+            if fs.getInfo(recPath..'.dat') then
+                fs.write('record/'..v..'.rec',fs.read(recPath..'.dat'))
+                fs.remove(recPath..'.dat')
             end
-            if fs.getInfo(k..'.rec') then
-                fs.write('record/'..v..'.rec',fs.read(k..'.rec'))
-                fs.remove(k..'.rec')
+            if fs.getInfo(recPath..'.rec') then
+                fs.write('record/'..v..'.rec',fs.read(recPath..'.rec'))
+                fs.remove(recPath..'.rec')
             end
         end
         STAT.version=VERSION.code
@@ -554,7 +557,7 @@ applySettings()
 
 -- Load replays
 for _,fileName in next,fs.getDirectoryItems('replay') do
-    if fileName:sub(12,12):match("[a-zA-Z]") then
+    if fileName:find("^20%d%d") and fileName:sub(12,12):match("[a-zA-Z]") then
         repeat
             local date,mode,version,player,seed,setting,mod
             local success,fileData=true,fs.read('replay/'..fileName)
@@ -661,6 +664,61 @@ if TABLE.find(arg,'--test') then
         end
         LOG("\27[91m\27[1mAutomatic Test Failed :(\27[0m\nThe error message is:\n"..table.concat(Z.getErr(1).mes,"\n").."\27[91m\nAborting\27[0m")
         TEST.yieldN(60)
+        love.event.quit(1)
+    end)
+end
+
+if TABLE.find(arg,'--test-replay') then
+    TASK.new(function()
+        while not LOADED do coroutine.yield() end
+        LOG("\27[92m\27[1mReplay Test Started\27[0m")
+        BGM.setVol(0)
+        SFX.setVol(0)
+
+        local rep
+        for _,r in ipairs(REPLAY) do
+            if r.fileName and r.fileName:find("ranked_") then
+                rep=r
+                break
+            end
+        end
+        assert(rep, "No ranked replay found in REPLAY")
+        LOG("Selected replay: "..tostring(rep.fileName))
+        SCN.scenes.replays.playRankedRep(rep)
+        TEST.yieldUntilNextScene()
+
+        LOG("Simulating replay for 450 frames...")
+        for i=1,450 do
+            coroutine.yield()
+        end
+
+        assert(#PLAYERS==2, "Expected 2 players")
+        LOG(("Player 1: %s, frameRun: %d, streamProgress: %s"):format(tostring(PLAYERS[1].username), PLAYERS[1].frameRun, tostring(PLAYERS[1].streamProgress)))
+        LOG(("Player 2: %s, frameRun: %d, streamProgress: %s"):format(tostring(PLAYERS[2].username), PLAYERS[2].frameRun, tostring(PLAYERS[2].streamProgress)))
+        assert(PLAYERS[1].frameRun > 200, "Player 1 failed to advance frameRun")
+        assert(PLAYERS[2].frameRun > 200, "Player 2 failed to advance frameRun")
+
+        LOG("Testing seek forward to frame 600...")
+        NET.seekReplay(600)
+        coroutine.yield()
+        LOG(("After seek to 600: P1 frameRun=%d, P2 frameRun=%d"):format(PLAYERS[1].frameRun, PLAYERS[2].frameRun))
+        assert(PLAYERS[1].frameRun == 600, "Seek forward failed")
+
+        LOG("Testing seek backward to frame 120...")
+        NET.seekReplay(120)
+        coroutine.yield()
+        LOG(("After seek to 120: P1 frameRun=%d, P2 frameRun=%d"):format(PLAYERS[1].frameRun, PLAYERS[2].frameRun))
+        assert(PLAYERS[1].frameRun >= 120 and PLAYERS[1].frameRun <= 122, "Seek backward failed")
+
+        LOG("\27[92m\27[1mReplay Test Passed :)\27[0m")
+        love.event.quit(0)
+    end)
+    TASK.new(function()
+        while true do
+            coroutine.yield()
+            if Z.getErr(1) then break end
+        end
+        LOG("\27[91m\27[1mReplay Test Failed :(\27[0m\nThe error message is:\n"..table.concat(Z.getErr(1).mes,"\n").."\27[91m\nAborting\27[0m")
         love.event.quit(1)
     end)
 end

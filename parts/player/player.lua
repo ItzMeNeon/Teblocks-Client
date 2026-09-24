@@ -504,7 +504,7 @@ function Player:act_down10()
     if self.cur then
         if self.curY>self.ghoY then
             local ghoY0=self.ghoY
-            self.ghoY=max(self.curY-0,self.ghoY)
+            self.ghoY=max(self.curY-10,self.ghoY)
             self:createDropFX()
             self.curY,self.ghoY=self.ghoY,ghoY0
             self:freshBlockDelay()
@@ -815,7 +815,7 @@ function Player:getHolePos()-- Get a good garbage-line hole position
     end
 end
 function Player:garbageRelease()-- Check garbage buffer and try to release them
-    if self.type=='remote' then return end
+    if self.type=='remote' and not GAME.replaying then return end
     local n=1
     while true do
         local A=self.atkBuffer[n]
@@ -1881,7 +1881,7 @@ do
     function Player:drop(autoLock)
         local _
         local CHN=VOC.getFreeChannel()
-        self.dropTime[11]=ins(self.dropTime,1,self.frameRun)-- Update speed dial
+        ins(self.dropTime,1,self.frameRun); self.dropTime[11]=nil-- Update speed dial
         local ENV=self.gameEnv
         local Stat=self.stat
         local piece=self.lastPiece
@@ -2489,7 +2489,7 @@ local function task_lose(self)
                 return
             end
         end
-        if not self.gameEnv.layout=='royale' and #PLAYERS>1 then
+        if self.gameEnv.layout~='royale' and #PLAYERS>1 then
             self.y=self.y+self.endCounter*.26
             self.absFieldY=self.absFieldY+self.endCounter*.26
         end
@@ -2975,6 +2975,9 @@ local function update_streaming(P)
                     end
 
                     if SRC and target and target.gameEnv and target.gameEnv.extraEventHandler and target.gameEnv.extraEventHandler['attack'] then
+                        if SRC.createBeam then
+                            SRC:createBeam(target,P.stream[paramBase+1])
+                        end
                         target.gameEnv.extraEventHandler['attack'](target,SRC,
                             target.sid,
                             P.stream[paramBase+1],
@@ -3125,13 +3128,15 @@ function Player:update(dt)
                 -- match hands off via match_finish_ranked.
                 TASK.new(function()
                     local t=0
-                    while t<2.6 do t=t+coroutine.yield() end
-                    if GAME.replaying and SCN.cur=='net_game' then
-                        if NET.rankedResult then
-                            SCN.go('net_rankedResult','fade')
-                        else
-                            SCN.back()
+                    while t<2.6 do
+                        local dt=coroutine.yield()
+                        if not (GAME.replaying and not self.stream[self.streamProgress]) then
+                            return
                         end
+                        t=t+(dt or 0.016)
+                    end
+                    if GAME.replaying and SCN.cur=='net_game' and NET.rankedResult then
+                        SCN.go('net_rankedResult','fade')
                     end
                 end)
             end
@@ -3209,7 +3214,7 @@ function Player:win(result)
             end
         end
     end
-    if self.type=='human' then
+    if self.type=='human' or GAME.replaying then
         GAME.result=result or 'gamewin'
         SFX.play('win')
         VOC.play('win')
@@ -3238,7 +3243,7 @@ function Player:lose(force)
         if self.life>0 then
             self:revive()
             return
-        elseif self.type=='remote' then
+        elseif self.type=='remote' and not GAME.replaying then
             if not self.loseTimer then
                 self.waiting=1e99
                 return

@@ -62,6 +62,7 @@ local NETPLY
 
 local nullIndex={
     __index=function(self,k)
+        if not k or GAME.replaying then return nil end
         MES.traceback()
         MES.new('error',"User not loaded: "..tostring(k))
         NETPLY.add{

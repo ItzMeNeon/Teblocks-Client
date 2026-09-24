@@ -37,12 +37,7 @@ local BTM_H     = math.floor(38 * uiScale)
 local BTM_Y1    = math.max(NAV0 + 6 * STRIDE + 6, 720 - BTM_H * 2 - 18)
 local BTM_Y2    = BTM_Y1 + BTM_H + 6
 
--- Options Sidebar (slides in from right for clean in-scene overlay)
-local OPT_W        = 350       -- Options panel width
-local optTarget    = 0         -- 0 = closed, 1 = open
-local optAnim      = 0         -- Interpolated 0 -> 1
-local optTab       = 'general' -- 'general', 'audio', 'video'
-local activeSlider = nil       -- 'mainVol', 'bgm', 'sfx', 'uiScale' when dragging
+-- Options sidebar is now handled globally by SETTINGS (parts.settingsSidebar)
 
 -- Top-bar icon buttons (fixed, top left)
 -- Neatly aligned horizontally with uniform 6px gap, 36px size, vertically centered in 52px top bar
@@ -150,13 +145,13 @@ local function setSubmenu(v)
 end
 
 local function toggleOptions(open)
-    if open ~= nil then
-        optTarget = open and 1 or 0
+    if not SETTINGS then return end
+    if open == true then
+        SETTINGS.open()
+    elseif open == false then
+        SETTINGS.close()
     else
-        optTarget = (optTarget == 0) and 1 or 0
-    end
-    if optTarget == 0 then
-        activeSlider = nil
+        SETTINGS.toggle()
     end
 end
 
@@ -467,9 +462,9 @@ function scene.enter()
     DiscordRPC.update("In Main Menu")
     setSubmenu(false)
     toggleOptions(false)
-    optAnim = 0
-    activeSlider = nil
-    WIDGET.blockZone = function(x, y) return optAnim > 0.05 end
+    WIDGET.blockZone = function(x, y)
+        return SETTINGS and SETTINGS.isOpen and (x <= SETTINGS.w)
+    end
     initBGFallers()
     profMenuOpen = false
     profMenuAnim = 0
@@ -485,7 +480,6 @@ function scene.leave()
     profMenuOpen = false
     profMenuAnim = 0
     AUTH.close()
-    activeSlider = nil
     WIDGET.blockZone = nil
     saveSettings()
 end
@@ -582,213 +576,10 @@ function scene.mouseDown(x, y)
 
     -- Profile pill toggle
     if x >= PROF_X and x <= PROF_X + PROF_W and y >= PROF_Y and y <= PROF_Y + PROF_H then
-        if optAnim > 0.05 then toggleOptions(false) end
+        if SETTINGS and SETTINGS.isOpen then SETTINGS.close() end
         profMenuOpen = not profMenuOpen
         SFX.play('click')
         return true
-    end
-
-    -- Options sidebar overlay handling
-    if optAnim > 0.05 then
-        local panelLeft = 1280 - OPT_W * optAnim
-        if x < panelLeft then
-            toggleOptions(false)
-            return
-        end
-
-        -- Close button
-        if x >= 1280 - 45 and x <= 1280 - 15 and y >= TB_H + 10 and y <= TB_H + 42 then
-            toggleOptions(false)
-            return
-        end
-
-        -- Tab switching inside Options (General, Audio, Video)
-        local tabY = TB_H + 50
-        if y >= tabY and y <= tabY + 32 then
-            if x >= panelLeft + 16 and x <= panelLeft + 112 then
-                optTab = 'general'
-                SFX.play('click')
-                return
-            elseif x >= panelLeft + 118 and x <= panelLeft + 214 then
-                optTab = 'audio'
-                SFX.play('click')
-                return
-            elseif x >= panelLeft + 220 and x <= panelLeft + 316 then
-                optTab = 'video'
-                SFX.play('click')
-                return
-            end
-        end
-
-        -- In-scene settings controls
-        local itemY0 = TB_H + 92
-        local rowH   = 52
-        local stride = 58
-
-        if optTab == 'general' then
-            -- Row 1: UI & Menu Scale Slider & Presets (Height = 70)
-            local scaleH = 70
-            if y >= itemY0 and y <= itemY0 + scaleH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                -- Preset chips at y >= itemY0 + 38 and y <= itemY0 + 64:
-                if y >= itemY0 + 38 and y <= itemY0 + 64 then
-                    local chips = {
-                        { val = 0.80, x = panelLeft + 16 + 14,  w = 90 },
-                        { val = 1.00, x = panelLeft + 16 + 114, w = 90 },
-                        { val = 1.20, x = panelLeft + 16 + 214, w = 90 },
-                    }
-                    for _, ch in ipairs(chips) do
-                        if x >= ch.x and x <= ch.x + ch.w then
-                            applyUIScale(ch.val)
-                            saveSettings()
-                            SFX.play('click')
-                            MES.new('check', ("UI Scale set to %d%%"):format(math.floor(ch.val * 100)))
-                            return
-                        end
-                    end
-                end
-                -- Slider track click / drag
-                activeSlider = 'uiScale'
-                local v = math.max(0, math.min(1, (x - (panelLeft + 30)) / (OPT_W - 60)))
-                local scale = 0.75 + v * 0.60
-                applyUIScale(math.floor(scale * 100) / 100)
-                saveSettings()
-                return
-            end
-
-            local genY0 = itemY0 + 78
-            -- Row 2: Rotation System (TRS, SRS, etc.)
-            if y >= genY0 and y <= genY0 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                local rsList = {'TRS','SRS','SRS_plus','BiRS','Classic'}
-                local curRS = TABLE.find(rsList, SETTING.RS) or 1
-                curRS = (curRS % #rsList) + 1
-                SETTING.RS = rsList[curRS]
-                saveSettings()
-                SFX.play('rotate')
-                return
-            end
-            -- Row 3: Auto Pause Toggle
-            if y >= genY0 + stride and y <= genY0 + stride + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SETTING.autoPause = not SETTING.autoPause
-                saveSettings()
-                SFX.play('click')
-                return
-            end
-            -- Row 4: Auto Save Records Toggle
-            if y >= genY0 + stride * 2 and y <= genY0 + stride * 2 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SETTING.autoSave = not SETTING.autoSave
-                saveSettings()
-                SFX.play('click')
-                return
-            end
-            -- Row 5: Simplistic Mode Toggle
-            if y >= genY0 + stride * 3 and y <= genY0 + stride * 3 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SETTING.simpMode = not SETTING.simpMode
-                saveSettings()
-                local p = TABLE.find(SCN.stack,'main') or TABLE.find(SCN.stack,'main_simple')
-                if p then SCN.stack[p] = SETTING.simpMode and 'main_simple' or 'main' end
-                SCN.swapTo(SETTING.simpMode and 'main_simple' or 'main', 'fade')
-                return
-            end
-            -- Row 6: Open Full Keyboard Config
-            if y >= genY0 + stride * 4 and y <= genY0 + stride * 4 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SCN.go('setting_key')
-                return
-            end
-            -- Row 7: Open Advanced Game Settings
-            if y >= genY0 + stride * 5 and y <= genY0 + stride * 5 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SCN.go('setting_game')
-                return
-            end
-
-        elseif optTab == 'audio' then
-            -- Row 1: Master Volume Slider
-            if y >= itemY0 and y <= itemY0 + 58 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                activeSlider = 'mainVol'
-                local v = math.max(0, math.min(1, (x - (panelLeft + 30)) / (OPT_W - 60)))
-                SETTING.mainVol = math.floor(v * 100) / 100
-                love.audio.setVolume(SETTING.mainVol)
-                saveSettings()
-                return
-            end
-            -- Row 2: Music Volume Slider
-            if y >= itemY0 + 64 and y <= itemY0 + 122 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                activeSlider = 'bgm'
-                local v = math.max(0, math.min(1, (x - (panelLeft + 30)) / (OPT_W - 60)))
-                SETTING.bgm = math.floor(v * 100) / 100
-                BGM.setVol(SETTING.bgm)
-                saveSettings()
-                return
-            end
-            -- Row 3: SFX Volume Slider
-            if y >= itemY0 + 128 and y <= itemY0 + 186 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                activeSlider = 'sfx'
-                local v = math.max(0, math.min(1, (x - (panelLeft + 30)) / (OPT_W - 60)))
-                SETTING.sfx = math.floor(v * 100) / 100
-                SFX.setVol(SETTING.sfx)
-                saveSettings()
-                SFX.play('warn_1')
-                return
-            end
-            -- Row 4: Auto Mute Toggle
-            if y >= itemY0 + 192 and y <= itemY0 + 244 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SETTING.autoMute = not SETTING.autoMute
-                saveSettings()
-                SFX.play('click')
-                return
-            end
-            -- Row 5: Voice & Sound Packs
-            if y >= itemY0 + 250 and y <= itemY0 + 302 and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SCN.go('setting_sound')
-                return
-            end
-
-        elseif optTab == 'video' then
-            -- Row 1: Active Piece Toggle
-            if y >= itemY0 and y <= itemY0 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SETTING.block = not SETTING.block
-                saveSettings()
-                SFX.play('click')
-                return
-            end
-            -- Row 2: Smooth Falling Toggle
-            if y >= itemY0 + stride and y <= itemY0 + stride + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SETTING.smooth = not SETTING.smooth
-                saveSettings()
-                SFX.play('click')
-                return
-            end
-            -- Row 3: 3D Blocks Toggle
-            if y >= itemY0 + stride * 2 and y <= itemY0 + stride * 2 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SETTING.upEdge = not SETTING.upEdge
-                saveSettings()
-                SFX.play('click')
-                return
-            end
-            -- Row 4: Fullscreen Toggle
-            if y >= itemY0 + stride * 3 and y <= itemY0 + stride * 3 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SETTING.fullscreen = not SETTING.fullscreen
-                applySettings()
-                saveSettings()
-                SFX.play('click')
-                return
-            end
-            -- Row 5: Skin Gallery
-            if y >= itemY0 + stride * 4 and y <= itemY0 + stride * 4 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                if not (USER and USER.uid and USER.uid ~= false) then
-                    MES.new('warn', "Please log in to access Skin Direct")
-                    AUTH.open('login')
-                else
-                    SCN.go('skin_browse')
-                end
-                return
-            end
-            -- Row 6: Advanced Video Settings
-            if y >= itemY0 + stride * 5 and y <= itemY0 + stride * 5 + rowH and x >= panelLeft + 16 and x <= panelLeft + OPT_W - 16 then
-                SCN.go('setting_video')
-                return
-            end
-        end
-        return
     end
 
     -- Console easter-egg on title
@@ -798,40 +589,10 @@ function scene.mouseDown(x, y)
 end
 scene.touchDown = scene.mouseDown
 
-function scene.mouseMove(x, y)
-    if activeSlider and love.mouse.isDown(1) then
-        local panelLeft = 1280 - OPT_W * optAnim
-        local v = math.max(0, math.min(1, (x - (panelLeft + 30)) / (OPT_W - 60)))
-        v = math.floor(v * 100) / 100
-        if activeSlider == 'uiScale' then
-            local scale = 0.75 + v * 0.60
-            applyUIScale(math.floor(scale * 100) / 100)
-        elseif activeSlider == 'mainVol' then
-            SETTING.mainVol = v
-            love.audio.setVolume(v)
-        elseif activeSlider == 'bgm' then
-            SETTING.bgm = v
-            BGM.setVol(v)
-        elseif activeSlider == 'sfx' then
-            SETTING.sfx = v
-            SFX.setVol(v)
-        end
-    end
-end
+function scene.mouseMove(x, y) end
 scene.touchMove = scene.mouseMove
 
-function scene.mouseUp(x, y)
-    if activeSlider then
-        if activeSlider == 'sfx' then
-            SFX.play('warn_1')
-        elseif activeSlider == 'uiScale' then
-            SFX.play('click')
-            MES.new('check', ("UI Scale set to %d%%"):format(math.floor((SETTING.uiScale or 1.0) * 100)))
-        end
-        saveSettings()
-        activeSlider = nil
-    end
-end
+function scene.mouseUp(x, y) end
 scene.touchUp = scene.mouseUp
 
 -- ════════════════════════════════════════════════════════════
@@ -853,8 +614,8 @@ function scene.keyDown(key, isRep)
     if isRep then return false end
 
     -- Options sidebar closes on escape or Android back
-    if optTarget == 1 and (key == 'escape' or key == 'back' or key == 'backspace') then
-        toggleOptions(false)
+    if SETTINGS and SETTINGS.isOpen and (key == 'escape' or key == 'back' or key == 'backspace') then
+        SETTINGS.close()
         return false
     end
 
@@ -865,7 +626,7 @@ function scene.keyDown(key, isRep)
     end
 
     -- Toggle profile menu on enter
-    if optTarget == 0 and (key == 'return' or key == 'kpenter') then
+    if (not SETTINGS or not SETTINGS.isOpen) and (key == 'return' or key == 'kpenter') then
         profMenuOpen = not profMenuOpen
         return false
     end
@@ -933,19 +694,16 @@ function scene.update(dt)
 
     if flash > 0 then flash = flash - dt * .6 end
 
-    -- Options sidebar animation
-    optAnim = MATH.expApproach(optAnim, optTarget, dt * 14)
-
     -- Close profile dropdown when options sidebar opens
-    if optTarget == 1 or optAnim > 0.05 then
+    if SETTINGS and SETTINGS.isOpen then
         profMenuOpen = false
     end
     profMenuAnim = MATH.expApproach(profMenuAnim, profMenuOpen and 1 or 0, dt * 16)
     REG_CONFIRM.update(dt)
     AUTH.update(dt)
 
-    -- Dynamic centering of demo board (centered at 640, smoothly adjusts if options open)
-    local pCenterX = 640 - (optAnim * 38)
+    -- Dynamic centering of demo board
+    local pCenterX = 640
     PLAYERS[1]:setPosition(pCenterX, 150, .76)
     PLAYERS[1]:update(dt)
 
@@ -1181,389 +939,6 @@ local function drawTopBarTooltips()
     end
 end
 
--- ─── drawOptionsSidebar ──────────────────────────────────────
-local function drawOptionsSidebar(t)
-    if optAnim < 0.005 then return end
-
-    local panelLeft = 1280 - OPT_W * optAnim
-    local alpha = optAnim
-    local mx, my = getMousePos()
-
-    -- Dim background layer
-    GC.setColor(0, 0, 0, alpha * 0.45)
-    GC.rectangle('fill', 0, TB_H, 1280, 720 - TB_H)
-
-    -- Sidebar background
-    GC.setColor(.05, .06, .14, alpha * 0.98)
-    GC.rectangle('fill', panelLeft, TB_H, OPT_W, 720 - TB_H)
-
-    -- Left border glowing accent line
-    GC.setColor(.24, .36, .75, alpha * 0.85)
-    GC.setLineWidth(2)
-    GC.line(panelLeft, TB_H, panelLeft, 720)
-
-    -- Header
-    GC.setColor(.90, .94, 1, alpha)
-    setFont(18)
-    GC.print("OPTIONS & SETTINGS", panelLeft + 20, TB_H + 16)
-
-    -- Close [✕] Button
-    local isCloseHover = (mx >= 1280 - 45 and mx <= 1280 - 15 and my >= TB_H + 10 and my <= TB_H + 42)
-    if isCloseHover then
-        GC.setColor(1, .35, .45, alpha)
-    else
-        GC.setColor(.60, .68, .88, alpha * 0.85)
-    end
-    setFont(20)
-    GC.mStr("✕", 1280 - 28, TB_H + 14)
-
-    -- Tabs bar: General, Audio, Video
-    local tabY = TB_H + 50
-    local tabH = 30
-    local tabs = {
-        { id = 'general', label = "General", x = panelLeft + 16,  w = 96 },
-        { id = 'audio',   label = "Audio",   x = panelLeft + 118, w = 96 },
-        { id = 'video',   label = "Video",   x = panelLeft + 220, w = 96 },
-    }
-
-    for _, tb in ipairs(tabs) do
-        local isCur = (optTab == tb.id)
-        local isHover = (mx >= tb.x and mx <= tb.x + tb.w and my >= tabY and my <= tabY + tabH)
-        if isCur then
-            GC.setColor(.22, .34, .75, alpha * 0.9)
-            GC.rectangle('fill', tb.x, tabY, tb.w, tabH, 5)
-            GC.setColor(.45, .70, 1, alpha)
-            GC.setLineWidth(1.5)
-            GC.rectangle('line', tb.x, tabY, tb.w, tabH, 5)
-            GC.setColor(1, 1, 1, alpha)
-        elseif isHover then
-            GC.setColor(.14, .18, .36, alpha * 0.75)
-            GC.rectangle('fill', tb.x, tabY, tb.w, tabH, 5)
-            GC.setColor(.35, .45, .80, alpha * 0.6)
-            GC.setLineWidth(1)
-            GC.rectangle('line', tb.x, tabY, tb.w, tabH, 5)
-            GC.setColor(.85, .90, 1, alpha * 0.9)
-        else
-            GC.setColor(.08, .11, .24, alpha * 0.55)
-            GC.rectangle('fill', tb.x, tabY, tb.w, tabH, 5)
-            GC.setColor(.18, .22, .42, alpha * 0.4)
-            GC.setLineWidth(1)
-            GC.rectangle('line', tb.x, tabY, tb.w, tabH, 5)
-            GC.setColor(.60, .68, .85, alpha * 0.75)
-        end
-        setFont(13)
-        GC.mStr(tb.label, tb.x + tb.w * 0.5, tabY + 7)
-    end
-
-    -- Tab Content Controls
-    local itemY0 = TB_H + 92
-    local itemW  = OPT_W - 32
-    local itemX  = panelLeft + 16
-
-    local function drawCard(rx, ry, rw, rh, isHover)
-        if isHover then
-            GC.setColor(.16, .22, .44, alpha * 0.85)
-            GC.rectangle('fill', rx, ry, rw, rh, 6)
-            GC.setColor(.35, .50, .90, alpha * 0.75)
-            GC.setLineWidth(1)
-            GC.rectangle('line', rx, ry, rw, rh, 6)
-        else
-            GC.setColor(.09, .12, .25, alpha * 0.65)
-            GC.rectangle('fill', rx, ry, rw, rh, 6)
-            GC.setColor(.18, .22, .42, alpha * 0.40)
-            GC.setLineWidth(1)
-            GC.rectangle('line', rx, ry, rw, rh, 6)
-        end
-    end
-
-    local function drawSwitch(rx, ry, rw, rh, isOn)
-        local sw, sh = 44, 22
-        local sx, sy = rx + rw - sw - 12, ry + (rh - sh) * 0.5
-        if isOn then
-            GC.setColor(.18, .75, .42, alpha * 0.9)
-        else
-            GC.setColor(.22, .26, .38, alpha * 0.7)
-        end
-        GC.rectangle('fill', sx, sy, sw, sh, sh * 0.5)
-        local knobX = isOn and (sx + sw - sh + 2) or (sx + 2)
-        local knobY = sy + 2
-        local knobD = sh - 4
-        GC.setColor(1, 1, 1, alpha)
-        GC.circle('fill', knobX + knobD * 0.5, knobY + knobD * 0.5, knobD * 0.5)
-        setFont(11)
-        if isOn then
-            GC.setColor(.3, .95, .5, alpha)
-            GC.print("ON", sx - 26, sy + 3)
-        else
-            GC.setColor(.6, .65, .75, alpha * 0.8)
-            GC.print("OFF", sx - 28, sy + 3)
-        end
-    end
-
-    local function drawSliderCtrl(rx, ry, rw, rh, val, label, isHover)
-        drawCard(rx, ry, rw, rh, isHover)
-        GC.setColor(.92, .96, 1, alpha * 0.95)
-        setFont(14)
-        GC.print(label, rx + 14, ry + 8)
-        local pct = ("%d%%"):format(math.floor(val * 100))
-        setFont(13)
-        GC.setColor(.55, .78, 1, alpha * 0.9)
-        GC.mStr(pct, rx + rw - 30, ry + 8)
-
-        local trackX = rx + 14
-        local trackY = ry + 34
-        local trackW = rw - 28
-        local trackH = 8
-        GC.setColor(.14, .18, .32, alpha * 0.85)
-        GC.rectangle('fill', trackX, trackY, trackW, trackH, 4)
-
-        local fillW = math.max(0, math.min(trackW, trackW * val))
-        if fillW > 0 then
-            GC.setColor(.32, .68, 1, alpha * 0.95)
-            GC.rectangle('fill', trackX, trackY, fillW, trackH, 4)
-        end
-        local knobX = trackX + fillW
-        local knobY = trackY + trackH * 0.5
-        GC.setColor(1, 1, 1, alpha)
-        GC.circle('fill', knobX, knobY, 7)
-        GC.setColor(.22, .45, .88, alpha * 0.85)
-        GC.setLineWidth(1.5)
-        GC.circle('line', knobX, knobY, 7)
-    end
-
-    if optTab == 'general' then
-        -- Card 1: UI & Menu Scale Slider & Presets (Height = 70)
-        local scaleCardH = 70
-        local isHovScale = (mx >= itemX and mx <= itemX + itemW and my >= itemY0 and my <= itemY0 + scaleCardH)
-        drawCard(itemX, itemY0, itemW, scaleCardH, isHovScale)
-
-        GC.setColor(.92, .96, 1, alpha * 0.95)
-        setFont(14)
-        GC.print("UI & Menu Scale", itemX + 14, itemY0 + 6)
-
-        local curScale = (SETTING and SETTING.uiScale) or 1.0
-        local pctStr = ("%d%%"):format(math.floor(curScale * 100))
-        setFont(13)
-        GC.setColor(COLOR.lC[1], COLOR.lC[2], COLOR.lC[3], alpha * 0.95)
-        GC.mStr(pctStr, itemX + itemW - 32, itemY0 + 6)
-
-        -- Slider track (range 0.75 - 1.35)
-        local trackX = itemX + 14
-        local trackY = itemY0 + 26
-        local trackW = itemW - 28
-        local trackH = 6
-        GC.setColor(.14, .18, .32, alpha * 0.85)
-        GC.rectangle('fill', trackX, trackY, trackW, trackH, 3)
-
-        local normVal = math.max(0, math.min(1, (curScale - 0.75) / (1.35 - 0.75)))
-        local fillW = trackW * normVal
-        if fillW > 0 then
-            GC.setColor(.32, .68, 1, alpha * 0.95)
-            GC.rectangle('fill', trackX, trackY, fillW, trackH, 3)
-        end
-        local knobX = trackX + fillW
-        local knobY = trackY + trackH * 0.5
-        GC.setColor(1, 1, 1, alpha)
-        GC.circle('fill', knobX, knobY, 6)
-        GC.setColor(.22, .45, .88, alpha * 0.85)
-        GC.setLineWidth(1.5)
-        GC.circle('line', knobX, knobY, 6)
-
-        -- Quick preset chips: [80% Small] [100% Normal] [120% Large]
-        local chips = {
-            { val = 0.80, label = "80% Small",   x = itemX + 14,  w = 90 },
-            { val = 1.00, label = "100% Normal", x = itemX + 114, w = 90 },
-            { val = 1.20, label = "120% Large",  x = itemX + 214, w = 90 },
-        }
-        local chipY = itemY0 + 40
-        local chipH = 22
-        for _, ch in ipairs(chips) do
-            local isSel = math.abs(curScale - ch.val) < 0.03
-            local isChipHov = (mx >= ch.x and mx <= ch.x + ch.w and my >= chipY and my <= chipY + chipH)
-            if isSel then
-                GC.setColor(.22, .48, .85, alpha * 0.9)
-                GC.rectangle('fill', ch.x, chipY, ch.w, chipH, 4)
-                GC.setColor(1, 1, 1, alpha)
-            elseif isChipHov then
-                GC.setColor(.18, .26, .52, alpha * 0.8)
-                GC.rectangle('fill', ch.x, chipY, ch.w, chipH, 4)
-                GC.setColor(.85, .92, 1, alpha * 0.95)
-            else
-                GC.setColor(.12, .15, .30, alpha * 0.6)
-                GC.rectangle('fill', ch.x, chipY, ch.w, chipH, 4)
-                GC.setColor(.65, .72, .88, alpha * 0.75)
-            end
-            setFont(10)
-            GC.mStr(ch.label, ch.x + ch.w * 0.5, chipY + 4)
-        end
-
-        local stride = 58
-        local rowH   = 52
-        local genY0  = itemY0 + 78
-        local genRows = {
-            {
-                title = "Rotation System",
-                sub   = "Piece rotation rule",
-                badge = "[ " .. tostring(SETTING.RS or 'TRS') .. " ]",
-                badgeCol = COLOR.lY,
-            },
-            {
-                title = "Auto Pause",
-                sub   = "Pause when window unfocused",
-                isSwitch = true,
-                val   = SETTING.autoPause,
-            },
-            {
-                title = "Auto Save Records",
-                sub   = "Save replays on game over",
-                isSwitch = true,
-                val   = SETTING.autoSave,
-            },
-            {
-                title = "Simplistic Mode",
-                sub   = "Clean distraction-free menu",
-                isSwitch = true,
-                val   = SETTING.simpMode,
-            },
-            {
-                title = "Keyboard Controls",
-                sub   = "Customize game keys",
-                badge = "Configure →",
-                badgeCol = COLOR.lC,
-            },
-            {
-                title = "Handling & Tuning",
-                sub   = "DAS, ARR, SD-ARR, Finesse",
-                badge = "Advanced →",
-                badgeCol = COLOR.lM,
-            },
-        }
-
-        for idx, row in ipairs(genRows) do
-            local ry = genY0 + (idx - 1) * stride
-            local isHover = (mx >= itemX and mx <= itemX + itemW and my >= ry and my <= ry + rowH)
-            drawCard(itemX, ry, itemW, rowH, isHover)
-
-            GC.setColor(.92, .96, 1, alpha * 0.95)
-            setFont(14)
-            GC.print(row.title, itemX + 14, ry + 7)
-
-            GC.setColor(.55, .62, .80, alpha * 0.75)
-            setFont(11)
-            GC.print(row.sub, itemX + 14, ry + 28)
-
-            if row.isSwitch then
-                drawSwitch(itemX, ry, itemW, rowH, row.val)
-            elseif row.badge then
-                local bc = row.badgeCol or COLOR.lC
-                GC.setColor(bc[1], bc[2], bc[3], alpha * 0.9)
-                setFont(12)
-                GC.mStr(row.badge, itemX + itemW - 48, ry + 16)
-            end
-        end
-
-    elseif optTab == 'audio' then
-        local isHov1 = (mx >= itemX and mx <= itemX + itemW and my >= itemY0 and my <= itemY0 + 58)
-        drawSliderCtrl(itemX, itemY0, itemW, 58, SETTING.mainVol or 1, "Master Volume", isHov1)
-
-        local isHov2 = (mx >= itemX and mx <= itemX + itemW and my >= itemY0 + 64 and my <= itemY0 + 122)
-        drawSliderCtrl(itemX, itemY0 + 64, itemW, 58, SETTING.bgm or 1, "Music (BGM)", isHov2)
-
-        local isHov3 = (mx >= itemX and mx <= itemX + itemW and my >= itemY0 + 128 and my <= itemY0 + 186)
-        drawSliderCtrl(itemX, itemY0 + 128, itemW, 58, SETTING.sfx or 1, "Sound Effects", isHov3)
-
-        -- Auto Mute
-        local ry4 = itemY0 + 192
-        local isHov4 = (mx >= itemX and mx <= itemX + itemW and my >= ry4 and my <= ry4 + 52)
-        drawCard(itemX, ry4, itemW, 52, isHov4)
-        GC.setColor(.92, .96, 1, alpha * 0.95)
-        setFont(14)
-        GC.print("Auto Mute", itemX + 14, ry4 + 7)
-        GC.setColor(.55, .62, .80, alpha * 0.75)
-        setFont(11)
-        GC.print("Mute audio on focus loss", itemX + 14, ry4 + 28)
-        drawSwitch(itemX, ry4, itemW, 52, SETTING.autoMute)
-
-        -- Sound Scene
-        local ry5 = itemY0 + 250
-        local isHov5 = (mx >= itemX and mx <= itemX + itemW and my >= ry5 and my <= ry5 + 52)
-        drawCard(itemX, ry5, itemW, 52, isHov5)
-        GC.setColor(.92, .96, 1, alpha * 0.95)
-        setFont(14)
-        GC.print("Voice & Sound Packs", itemX + 14, ry5 + 7)
-        GC.setColor(.55, .62, .80, alpha * 0.75)
-        setFont(11)
-        GC.print("Voice packs, stereo, alert SFX", itemX + 14, ry5 + 28)
-        GC.setColor(COLOR.lY[1], COLOR.lY[2], COLOR.lY[3], alpha * 0.9)
-        setFont(12)
-        GC.mStr("Sound Scene →", itemX + itemW - 54, ry5 + 16)
-
-    elseif optTab == 'video' then
-        local stride = 58
-        local rowH   = 52
-        local vidRows = {
-            {
-                title = "Active Piece",
-                sub   = "Show falling active tetromino",
-                isSwitch = true,
-                val   = SETTING.block,
-            },
-            {
-                title = "Smooth Falling",
-                sub   = "Sub-pixel smooth fall movement",
-                isSwitch = true,
-                val   = SETTING.smooth,
-            },
-            {
-                title = "3D Block Edges",
-                sub   = "Isometric bevel edge lighting",
-                isSwitch = true,
-                val   = SETTING.upEdge,
-            },
-            {
-                title = "Fullscreen Mode",
-                sub   = "Toggle borderless / fullscreen",
-                isSwitch = true,
-                val   = SETTING.fullscreen,
-            },
-            {
-                title = "Skin & Textures",
-                sub   = "Current: " .. tostring(SETTING.skinSet or 'default'),
-                badge = "Browse Skins →",
-                badgeCol = COLOR.lP,
-            },
-            {
-                title = "Visual Effects",
-                sub   = "Ghost piece, grid, shaders",
-                badge = "Advanced →",
-                badgeCol = COLOR.lC,
-            },
-        }
-
-        for idx, row in ipairs(vidRows) do
-            local ry = itemY0 + (idx - 1) * stride
-            local isHover = (mx >= itemX and mx <= itemX + itemW and my >= ry and my <= ry + rowH)
-            drawCard(itemX, ry, itemW, rowH, isHover)
-
-            GC.setColor(.92, .96, 1, alpha * 0.95)
-            setFont(14)
-            GC.print(row.title, itemX + 14, ry + 7)
-
-            GC.setColor(.55, .62, .80, alpha * 0.75)
-            setFont(11)
-            GC.print(row.sub, itemX + 14, ry + 28)
-
-            if row.isSwitch then
-                drawSwitch(itemX, ry, itemW, rowH, row.val)
-            elseif row.badge then
-                local bc = row.badgeCol or COLOR.lC
-                GC.setColor(bc[1], bc[2], bc[3], alpha * 0.9)
-                setFont(12)
-                GC.mStr(row.badge, itemX + itemW - 54, ry + 16)
-            end
-        end
-    end
-end
 
 -- ─── drawTip ─────────────────────────────────────────────────
 local function drawTip()
@@ -1641,10 +1016,7 @@ function scene.overDraw()
     -- 2. Compact Profile Dropdown menu (rendered ON TOP of buttons)
     drawProfileDropdown(t)
 
-    -- 3. Options Sidebar overlay
-    drawOptionsSidebar(t)
-
-    -- 4. Modals (Dark full-screen overlay + sharp dialog on top of everything)
+    -- 3. Modals (Dark full-screen overlay + sharp dialog on top of everything)
     AUTH.draw()
     REG_CONFIRM.draw()
 
