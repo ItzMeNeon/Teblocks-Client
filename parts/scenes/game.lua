@@ -60,7 +60,7 @@ local stepButtons={'step','autoSkip'}
 local replayButtons=TABLE.combine(speedButtons,stepButtons)
 local function _updateRepButtons()
     local L=scene.widgetList
-    if replaying or GAME.tasUsed then
+    if GAME.tasUsed then
         for i=1,#speedButtons do
             widgetWithName(speedButtons[i]).hide=false
         end
@@ -198,6 +198,20 @@ local function _checkGameKeyDown(key)
 end
 
 function scene.enter()
+    if GAME.replaying and not GAME.tasUsed then
+        -- Deprecated solo replay path in game.lua: forward to modern replay system
+        local fullRep={
+            mode=GAME.curModeName or (GAME.curMode and GAME.curMode.name) or "sprint_40l",
+            seed=GAME.seed,
+            setting=GAME.setting,
+            data=GAME.rep,
+            player=PLAYERS[1] and PLAYERS[1].username or (USER and USER.name) or "Player",
+            available=true,
+        }
+        NET.startSoloReplay(fullRep)
+        return
+    end
+
     if GAME.init then
         resetGameData()
         GAME.init=false
@@ -461,11 +475,11 @@ function scene.draw()
         end
     end
 
-    -- Replaying
-    if replaying or tas then
+    -- TAS
+    if tas then
         setFont(20)
         gc_setColor(1,1,TIME()%.8>.4 and 1 or 0)
-        mStr(replaying and text.replaying or text.tasUsing,770,6)
+        mStr(text.tasUsing,770,6)
         gc_setColor(1,1,1,.8)
         mStr(("%s   %sf"):format(repRateStrings[gameRate],PLAYERS[1].frameRun),770,31)
     end

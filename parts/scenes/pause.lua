@@ -237,9 +237,17 @@ function scene.keyDown(key,isRep)
         end
     elseif key=='p' then
         if (GAME.result or GAME.replaying) and GAME.initPlayerCount==1 then
-            resetGameData('r')
-            PLAYERS[1]:startStreaming(GAME.rep)
-            SCN.swapTo('game','none')
+            local repData=DATA.dumpRecording(GAME.rep)
+            local fullRep={
+                mode=GAME.curModeName or (GAME.curMode and GAME.curMode.name) or "sprint_40l",
+                seed=GAME.seed,
+                setting=GAME.setting,
+                data=repData,
+                player=USER.name or "Player",
+                available=true,
+                tasUsed=GAME.tasUsed,
+            }
+            NET.startSoloReplay(fullRep)
         end
     elseif key=='o' then
         if (GAME.result or GAME.replaying) and GAME.initPlayerCount==1 and not GAME.saved then

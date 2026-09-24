@@ -244,33 +244,13 @@ local function _playRep(rep)
         end
     elseif rep.mode=='netBattle' then
         _playRankedRep(rep)
-    elseif MODES[rep.mode] then
+    elseif MODES[rep.mode] or FILE.isSafe('parts/modes/'..rep.mode) then
         local fullRep=DATA.parseReplay(rep.fileName,true)
         if not fullRep or not fullRep.available then
             MES.new('error',text.replayBroken)
             return
         end
-        GAME.seed=fullRep.seed
-        GAME.setting=fullRep.setting
-        if #mods==0 then mods=GAME.mod end
-        GAME.mod=TABLE.new(0,#MODOPT)
-        for _,m in next,(fullRep.mod or {}) do
-            GAME.mod[m[1]+1]=m[2]
-        end
-        GAME.rep={}
-        DATA.pumpRecording(fullRep.data,GAME.rep)
-
-        loadGame(fullRep.mode,true)
-        if fullRep.private and GAME.curMode.loadPrivate then
-            GAME.curMode.loadPrivate(fullRep.private)
-        end
-        resetGameData('r')
-        PLAYERS[1].username=fullRep.player
-        PLAYERS[1]:startStreaming(GAME.rep)
-        GAME.init=false
-        GAME.saved=true
-        GAME.fromRepMenu=true
-        GAME.tasUsed=fullRep.tasUsed
+        NET.startSoloReplay(fullRep)
     else
         MES.new('error',("No mode id: [%s]"):format(rep.mode))
     end

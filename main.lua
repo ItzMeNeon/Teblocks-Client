@@ -710,6 +710,37 @@ if TABLE.find(arg,'--test-replay') then
         LOG(("After seek to 120: P1 frameRun=%d, P2 frameRun=%d"):format(PLAYERS[1].frameRun, PLAYERS[2].frameRun))
         assert(PLAYERS[1].frameRun >= 120 and PLAYERS[1].frameRun <= 122, "Seek backward failed")
 
+        local soloRep
+        for _,r in ipairs(REPLAY) do
+            if r.fileName and not r.fileName:find("ranked_") and (MODES[r.mode] or FILE.isSafe('parts/modes/'..r.mode)) then
+                soloRep=r
+                break
+            end
+        end
+        if soloRep then
+            LOG("Testing Solo Replay: "..tostring(soloRep.fileName).." (mode: "..tostring(soloRep.mode)..")")
+            local fullRep=DATA.parseReplay(soloRep.fileName,true)
+            assert(fullRep and fullRep.available, "Failed to parse solo replay")
+            NET.startSoloReplay(fullRep)
+            TEST.yieldUntilNextScene()
+            for i=1,300 do coroutine.yield() end
+            assert(#PLAYERS==1, "Expected 1 player in solo replay")
+            LOG(("Solo Player: %s, frameRun: %d, streamProgress: %s"):format(tostring(PLAYERS[1].username), PLAYERS[1].frameRun, tostring(PLAYERS[1].streamProgress)))
+            assert(PLAYERS[1].frameRun > 100, "Solo player failed to advance frameRun")
+
+            LOG("Testing solo replay seek forward to frame 400...")
+            NET.seekReplay(400)
+            coroutine.yield()
+            LOG(("After seek to 400: P1 frameRun=%d"):format(PLAYERS[1].frameRun))
+            assert(PLAYERS[1].frameRun == 400, "Solo replay seek forward failed")
+
+            LOG("Testing solo replay seek backward to frame 60...")
+            NET.seekReplay(60)
+            coroutine.yield()
+            LOG(("After seek to 60: P1 frameRun=%d"):format(PLAYERS[1].frameRun))
+            assert(PLAYERS[1].frameRun >= 60 and PLAYERS[1].frameRun <= 62, "Solo replay seek backward failed")
+        end
+
         LOG("\27[92m\27[1mReplay Test Passed :)\27[0m")
         love.event.quit(0)
     end)

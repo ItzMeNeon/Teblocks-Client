@@ -39,7 +39,7 @@ local noTouch,noKey=false,false
 local touchMoveLastFrame=false
 
 local function _replayFinished()
-    if #PLAYERS<2 then return false end
+    if #PLAYERS<1 then return false end
     local anyStream=false
     for p=1,#PLAYERS do
         local P=PLAYERS[p]
@@ -68,7 +68,7 @@ end
 -- position (its board bottom would sit under the seek bar at y>=664). Scale it
 -- down and lift it so it clears the slider instead of overlapping it.
 local function _replaySettleLayout()
-    local L=PLY_ALIVE
+    local L=#PLY_ALIVE>0 and PLY_ALIVE or PLAYERS
     if #L==0 then return end
     local size=#L==1 and .85 or .7
     for i=1,#L do
@@ -144,9 +144,25 @@ local function _gotoSetting()
     GAME.prevBG=BG.cur
     SCN.go('setting_game')
 end
+local function _updatePlayToggleIcon()
+    if scene and scene.widgetList then
+        for _,w in ipairs(scene.widgetList) do
+            if w.name=='replayPlayToggle' and w.obj and w.obj.set then
+                w.obj:set(paused and CHAR.icon.play or CHAR.icon.pause)
+                break
+            end
+        end
+    end
+end
+
 local function _quit()
+    if GAME.replaying then
+        GAME.playing=false
+        SCN.back()
+        return
+    end
     if tryBack() then
-        if not GAME.replaying then NET.room_leave() end
+        NET.room_leave()
         GAME.playing=false
         SCN.back()
     end
@@ -372,9 +388,7 @@ function scene.keyDown(key,isRep)
     if GAME.replaying then
         if key=='space' or key=='p' then
             paused=not paused
-            if scene.widgetList and scene.widgetList.replayPlayToggle and scene.widgetList.replayPlayToggle.setText then
-                scene.widgetList.replayPlayToggle:setText(paused and CHAR.icon.play or CHAR.icon.pause)
-            end
+            _updatePlayToggleIcon()
             return
         elseif key=='left' then
             local step=love.keyboard.isDown('lshift','rshift') and 60 or 300
@@ -402,7 +416,11 @@ function scene.keyDown(key,isRep)
                 if s<(GAME.replaySpeed or 1) then GAME.replaySpeed=s break end
             end
             return
-        elseif key=='escape' or key=='q' then
+        elseif key=='escape' then
+            paused=not paused
+            _updatePlayToggleIcon()
+            return
+        elseif key=='q' then
             _quit()
             return
         end
@@ -685,7 +703,7 @@ function scene.draw()
 
         -- Board labels: mark which board is yours (shown in live net matches
         -- and replays, mirroring the ranked replay presentation).
-        if GAME.net then
+        if GAME.net or GAME.replaying then
             setFont(GAME.replaying and 18 or 25)
             for p=1,#PLAYERS do
                 local P=PLAYERS[p]
@@ -693,8 +711,13 @@ function scene.draw()
                     local isYou=P.uid==USER.uid
                     local label
                     if GAME.replaying then
-                        label=(P.username and #P.username>0) and P.username or (isYou and "YOU" or ("PLAYER "..p))
-                        gc_setColor(p==1 and COLOR.lY or COLOR.lC)
+                        if #PLAYERS==1 then
+                            label=(P.username and #P.username>0) and P.username or (USER.name or "YOU")
+                            gc_setColor(COLOR.lY)
+                        else
+                            label=(P.username and #P.username>0) and P.username or (isYou and "YOU" or ("PLAYER "..p))
+                            gc_setColor(p==1 and COLOR.lY or COLOR.lC)
+                        end
                     else
                         label=isYou and "YOU" or (P.username or "OPPONENT")
                         gc_setColor(isYou and COLOR.lY or COLOR.lR)
@@ -717,6 +740,15 @@ function scene.draw()
             setFont(40)
             gc_setColor(COLOR.Z[1],COLOR.Z[2],COLOR.Z[3],NET._replayBannerAlpha)
             mStr("REPLAY",640,8)
+
+            if #PLAYERS==1 and GAME.curMode then
+                local modeName=GAME.curMode.name or GAME.curModeName
+                local modeText=text.modes[modeName]
+                local dispName=modeText and (modeText[1].." "..(modeText[2] or "")) or ("["..modeName.."]")
+                setFont(14)
+                gc_setColor(1,1,1,.65*NET._replayBannerAlpha)
+                mStr(dispName,640,48)
+            end
 
             -- Media-player style seek bar backdrop, so the slider/buttons don't
             -- clash with the boards behind them.
@@ -1119,20 +1151,19 @@ scene.widgetList={
     WIDGET.newKey{name='chat',    x=390,y=45,w=60,fText="···",                code=_switchChat,hideF=function() return true end},
     WIDGET.newKey{name='quit',    x=890,y=45,w=60,font=30,fText=CHAR.icon.cross_thick,code=_quit,hideF=function() return true end},
 
-    WIDGET.newKey{name='replayPause', x=40, y=50, w=60, font=40, fText=CHAR.icon.pause,   code=function() paused=not paused end,                                                                                       hideF=function() return not GAME.replaying end},
-    WIDGET.newKey{name='replaySpd1',  x=105,y=50, w=60, font=40, fText=CHAR.icon.speedOne,  code=function() GAME.replaySpeed=1  end,                                                                                       hideF=function() return not GAME.replaying end},
-    WIDGET.newKey{name='replaySpd2',  x=170,y=50, w=60, font=40, fText=CHAR.icon.speedTwo,  code=function() GAME.replaySpeed=2  end,                                                                                       hideF=function() return not GAME.replaying end},
-    WIDGET.newKey{name='replaySpd5',  x=235,y=50, w=60, font=40, fText=CHAR.icon.speedFive, code=function() GAME.replaySpeed=5  end,                                                                                       hideF=function() return not GAME.replaying end},
-    WIDGET.newKey{name='replaySpd10', x=300,y=50, w=60, font=30, fText="10x",               code=function() GAME.replaySpeed=10 end,                                                                                       hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replayQuit',  x=1220,y=50, w=50, font=30, fText=CHAR.icon.cross_thick,code=_quit,                                                                                       hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replayPause', x=40, y=50, w=60, font=40, fText=CHAR.icon.pause,   code=function() paused=not paused; _updatePlayToggleIcon() end,                                  hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replaySpd1',  x=105,y=50, w=60, font=40, fText=CHAR.icon.speedOne,  code=function() GAME.replaySpeed=1  end,                                                        hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replaySpd2',  x=170,y=50, w=60, font=40, fText=CHAR.icon.speedTwo,  code=function() GAME.replaySpeed=2  end,                                                        hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replaySpd5',  x=235,y=50, w=60, font=40, fText=CHAR.icon.speedFive, code=function() GAME.replaySpeed=5  end,                                                        hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replaySpd10', x=300,y=50, w=60, font=30, fText="10x",               code=function() GAME.replaySpeed=10 end,                                                        hideF=function() return not GAME.replaying end},
 
-    WIDGET.newKey{name='replayBack5', x=35, y=672, w=52, font=20, fText="-5s",              code=function() NET.seekReplay((NET._replayCur or 0)-300) end,                                                                hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replayBack5', x=35, y=672, w=52, font=20, fText="-5s",              code=function() NET.seekReplay((NET._replayCur or 0)-300) end,                                 hideF=function() return not GAME.replaying end},
     WIDGET.newKey{name='replayPlayToggle',x=95,y=672,w=52,font=32,fText=CHAR.icon.pause,code=function()
         paused=not paused
-        if scene.widgetList and scene.widgetList.replayPlayToggle and scene.widgetList.replayPlayToggle.setText then
-            scene.widgetList.replayPlayToggle:setText(paused and CHAR.icon.play or CHAR.icon.pause)
-        end
+        _updatePlayToggleIcon()
     end,hideF=function() return not GAME.replaying end},
-    WIDGET.newKey{name='replayFwd5',  x=155,y=672, w=52, font=20, fText="+5s",              code=function() NET.seekReplay((NET._replayCur or 0)+300) end,                                                                hideF=function() return not GAME.replaying end},
+    WIDGET.newKey{name='replayFwd5',  x=155,y=672, w=52, font=20, fText="+5s",              code=function() NET.seekReplay((NET._replayCur or 0)+300) end,                                 hideF=function() return not GAME.replaying end},
     WIDGET.newSlider{name='replaySeek',x=225,y=683,w=840,axis={0,1,false},disp=function() return (NET._replayTotal and NET._replayTotal>0) and (NET._replayCur or 0)/NET._replayTotal or 0 end,code=function(v) local f=math.floor(v*(NET._replayTotal or 1)); NET.seekReplay(f) end,hideF=function() return not GAME.replaying end},
 }
 

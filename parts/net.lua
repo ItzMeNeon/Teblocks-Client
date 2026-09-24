@@ -1025,7 +1025,7 @@ end
 -- steps forward remaining < 60 frames in microtime (<0.5ms). Caches all
 -- newly simulated keyframes along the way for real-time scrubbing.
 function NET.seekReplay(frame)
-    if not GAME.replaying or not NET._replayKeyframes or #PLAYERS<2 then return end
+    if not GAME.replaying or not NET._replayKeyframes or #PLAYERS<1 then return end
     local total=NET._replayTotal or 0
     frame=math.max(0,math.min(math.floor(frame or 0),total>0 and total or frame))
 
@@ -1087,7 +1087,12 @@ function NET.seekReplay(frame)
     NET._replayEndPos=nil
     if NET._replaySettled then
         NET._replaySettled=false
-        freshPlayerPosition('update')
+        if #PLAYERS==1 then
+            local size=0.85
+            PLAYERS[1]:movePosition(640-300*size, 664-600*size-36, size)
+        else
+            freshPlayerPosition('update')
+        end
     end
 end
 NET.seekRankedReplay=NET.seekReplay
@@ -1095,60 +1100,95 @@ NET.seekRankedReplay=NET.seekReplay
 -- Synchronously initialize streams onto the newly created players right after
 -- resetGameData in net_game.lua.
 function NET._initReplayStreams()
-    if not (NET._replayReps and NET._replayReps.myRep and NET._replayReps.oppRep) then return end
-    if #PLAYERS<2 then return end
+    if not (NET._replayReps and NET._replayReps.myRep) then return end
+    if #PLAYERS<1 then return end
 
     local myRep=NET._replayReps.myRep
     local oppRep=NET._replayReps.oppRep
     local myUid=tostring(NET._replayReps.myUid or "")
     local oppUid=tostring(NET._replayReps.oppUid or "")
 
-    local myList={}  DATA.pumpRecording(myRep.data or "",myList)
-    local oppList={} DATA.pumpRecording(oppRep.data or "",oppList)
+    local myList={}
+    if type(myRep.data)=='string' then
+        DATA.pumpRecording(myRep.data or "",myList)
+    elseif type(myRep.data)=='table' then
+        myList=TABLE.copy(myRep.data)
+    end
     GAME.rep=myList
     GAME.replaying=true
     GAME.replaySetup=false
     GAME.recording=false
 
-    -- Match players by UID so streams never get inverted
-    local pMy=PLAYERS[1]
-    local pOpp=PLAYERS[2]
-    for i=1,#PLAYERS do
-        if tostring(PLAYERS[i].uid)==myUid then
-            pMy=PLAYERS[i]
-        elseif tostring(PLAYERS[i].uid)==oppUid then
-            pOpp=PLAYERS[i]
-        end
-    end
-    if pMy==pOpp and #PLAYERS>=2 then
-        pMy=PLAYERS[1]
-        pOpp=PLAYERS[2]
-    end
-
-    if pMy then
-        pMy:startStreaming(myList)
-        if myRep.player and #myRep.player>0 then
-            pMy.username=myRep.player
-        end
-        pMy.sound=true
-    end
-    if pOpp then
-        pOpp:startStreaming(oppList)
-        if oppRep.player and #oppRep.player>0 then
-            pOpp.username=oppRep.player
-        end
-    end
-
-    NET._replayTotal=math.max(_replayStreamLength(myList),_replayStreamLength(oppList))
     local SNAPSHOT=require('parts.player.snapshot')
-    NET._replayKeyframes={
-        [0]={
-            players={
-                [1]=SNAPSHOT.snapshot(PLAYERS[1]),
-                [2]=SNAPSHOT.snapshot(PLAYERS[2]),
+
+    if #PLAYERS==1 then
+        local P=PLAYERS[1]
+        P:startStreaming(myList)
+        if myRep.player and #myRep.player>0 then
+            P.username=myRep.player
+        end
+        P.sound=true
+        local size=0.85
+        P:setPosition(640-300*size, 664-600*size-36, size)
+
+        NET._replayTotal=_replayStreamLength(myList)
+        NET._replayKeyframes={
+            [0]={
+                players={
+                    [1]=SNAPSHOT.snapshot(P),
+                }
             }
         }
-    }
+    else
+        local oppList={}
+        if oppRep then
+            if type(oppRep.data)=='string' then
+                DATA.pumpRecording(oppRep.data or "",oppList)
+            elseif type(oppRep.data)=='table' then
+                oppList=TABLE.copy(oppRep.data)
+            end
+        end
+
+        -- Match players by UID so streams never get inverted
+        local pMy=PLAYERS[1]
+        local pOpp=PLAYERS[2]
+        for i=1,#PLAYERS do
+            if tostring(PLAYERS[i].uid)==myUid then
+                pMy=PLAYERS[i]
+            elseif tostring(PLAYERS[i].uid)==oppUid then
+                pOpp=PLAYERS[i]
+            end
+        end
+        if pMy==pOpp and #PLAYERS>=2 then
+            pMy=PLAYERS[1]
+            pOpp=PLAYERS[2]
+        end
+
+        if pMy then
+            pMy:startStreaming(myList)
+            if myRep.player and #myRep.player>0 then
+                pMy.username=myRep.player
+            end
+            pMy.sound=true
+        end
+        if pOpp then
+            pOpp:startStreaming(oppList)
+            if oppRep and oppRep.player and #oppRep.player>0 then
+                pOpp.username=oppRep.player
+            end
+        end
+
+        NET._replayTotal=math.max(_replayStreamLength(myList),_replayStreamLength(oppList))
+        NET._replayKeyframes={
+            [0]={
+                players={
+                    [1]=SNAPSHOT.snapshot(PLAYERS[1]),
+                    [2]=SNAPSHOT.snapshot(PLAYERS[2]),
+                }
+            }
+        }
+    end
+
     NET._replayCur=0
     NET._replayFF=false
     NET._replayFFTarget=0
@@ -1158,6 +1198,88 @@ function NET._initReplayStreams()
     NET._replayEndPos=nil
     NET._replaySettled=false
     GAME.replaySpeed=1
+end
+
+function NET.startSoloReplay(fullRep)
+    if not fullRep or not fullRep.available then
+        MES.new('error',text.replayBroken)
+        return
+    end
+
+    local mode=fullRep.mode
+    if not mode or mode=="" then
+        MES.new('error',"Missing replay mode")
+        return
+    end
+
+    if not MODES[mode] and FILE.isSafe('parts/modes/'..mode) then
+        MODES[mode]=require('parts.modes.'..mode)
+        MODES[mode].name=mode
+    end
+    if not MODES[mode] then
+        MES.new('error',("No mode id: [%s]"):format(mode))
+        return
+    end
+
+    GAME.net=false
+    GAME.replaying=true
+    GAME.replaySetup=true
+    GAME.fromRepMenu=true
+    GAME.init=false
+    GAME.seed=fullRep.seed
+    GAME.setting=fullRep.setting or GAME.setting
+    GAME.curModeName=mode
+    GAME.curMode=MODES[mode]
+    GAME.modeEnv=GAME.curMode.env
+    GAME.tasUsed=fullRep.tasUsed or false
+
+    if fullRep.private and GAME.curMode.loadPrivate then
+        GAME.curMode.loadPrivate(fullRep.private)
+    end
+
+    GAME.mod=TABLE.new(0,#MODOPT)
+    for _,m in next,(fullRep.mod or {}) do
+        GAME.mod[m[1]+1]=m[2]
+    end
+
+    local myList={}
+    if type(fullRep.data)=='string' then
+        DATA.pumpRecording(fullRep.data,myList)
+    elseif type(fullRep.data)=='table' then
+        myList=TABLE.copy(fullRep.data)
+    end
+    GAME.rep=myList
+
+    NET._replayReps={myRep=fullRep,myUid=USER.uid}
+    NET._replayTotal=_replayStreamLength(myList)
+    NET._replayCur=0
+    NET._replayFF=false
+    NET._replayFFTarget=0
+    NET._replaySeekPending=false
+    NET._replaySeekFrame=0
+    NET._replayBannerAlpha=1
+    NET._replayEndPos=nil
+    NET._replaySettled=false
+    GAME.replaySpeed=1
+
+    NET._replayRoomState=NET.roomState
+
+    NET.roomState={
+        info={name="Replay: "..(MODES[mode].name or mode),type="solo",version="",description=""},
+        data={},
+        count={Gamer=1,Spectator=0},
+        capacity=1,
+        private=true,
+        state="Playing",
+    }
+    NETPLY.clear()
+    NETPLY.add{uid=USER.uid,group=0,role='Admin',playMode='Gamer',readyMode='Playing',name=fullRep.player or (USER and USER.name) or "Player"}
+
+    NET.seed=GAME.seed
+    NET.textBox.hide=true
+    NET.inputBox.hide=true
+    TASK.lock('netPlaying')
+    SCN.go('net_game','fade')
 end
 
 function NET.startRankedReplay(myRep,oppRep,myUid,oppUid)
