@@ -145,7 +145,17 @@ function TEXT.draw(list)
     for i=1,#list do
         local t=list[i]
         local p=t.c
-        setColor(1,1,1,p<.2 and p*5 or p<.8 and 1 or 5-p*5)
+        local alpha = p<.2 and p*5 or p<.8 and 1 or 5-p*5
+
+        -- Soft dark drop shadow for punchy pop (osu! / TETR.IO style)
+        GC.push('transform')
+        GC.translate(1.5, 2)
+        setColor(0, 0, 0, alpha * 0.82)
+        t:draw()
+        GC.pop()
+
+        -- Crisp gleaming foreground text
+        setColor(1, 1, 1, alpha)
         t:draw()
     end
 end

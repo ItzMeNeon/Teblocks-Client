@@ -380,6 +380,13 @@ local function _drawHoldPreview(B,x,y)
     end end
 end
 local function _drawBuffer(atkBuffer,bufferWarn,atkBufferSum1,atkBufferSum)
+    -- Background glass meter track
+    gc_setColor(0.04, 0.06, 0.12, 0.70)
+    gc_rectangle('fill', 303, 0, 11, 600, 3)
+    gc_setColor(0.20, 0.35, 0.60, 0.35)
+    gc_setLineWidth(1)
+    gc_rectangle('line', 303, 0, 11, 600, 3)
+
     local h=0
     for i=1,#atkBuffer do
         local A=atkBuffer[i]
@@ -416,6 +423,22 @@ local function _drawBuffer(atkBuffer,bufferWarn,atkBufferSum1,atkBufferSum)
         h=h+bar
         if h>=600 then break end
     end
+
+    -- Floating danger badge when attacks are queued
+    if atkBufferSum1 and atkBufferSum1 >= 4 then
+        local sum = atkBufferSum1
+        local pillY = max(20, 600 - 30 * sum - 15)
+        local pulse = 0.70 + 0.30 * math.sin(TIME() * 8)
+        gc_setColor(0.12, 0.04, 0.06, 0.92)
+        gc_rectangle('fill', 320, pillY, 44, 24, 6)
+        gc_setColor(1.0, 0.25, 0.35, pulse)
+        gc_setLineWidth(1.5)
+        gc_rectangle('line', 320, pillY, 44, 24, 6)
+        setFont(14)
+        gc_setColor(1.0, 0.92, 0.92, 1)
+        GC.mStr("+" .. floor(sum), 342, pillY + 3)
+    end
+
     if bufferWarn then
         local sum=atkBufferSum1
         if sum>=8 then
@@ -465,13 +488,28 @@ local function _drawB2Bbar(b2b,b2b1)
     end
 end
 local function _drawLDI(easyFresh,length,freshTime)-- Lock Delay Indicator
-    if easyFresh then
-        gc_setColor(.97,.97,.97)
-    else
-        gc_setColor(1,.5,.5)
-    end
     if length>=0 then
-        gc_rectangle('fill',0,602,300*length,4)
+        -- Background track
+        gc_setColor(0.04, 0.06, 0.12, 0.70)
+        gc_rectangle('fill', 0, 602, 300, 5, 2)
+        gc_setColor(0.20, 0.35, 0.60, 0.35)
+        gc_setLineWidth(1)
+        gc_rectangle('line', 0, 602, 300, 5, 2)
+
+        -- Dynamic neon color: bright cyan -> gold -> red
+        local r, g, b
+        if length > 0.5 then
+            r, g, b = 0.20, 0.95, 0.65
+        elseif length > 0.25 then
+            r, g, b = 1.0, 0.82, 0.22
+        else
+            r, g, b = 1.0, 0.30, 0.35
+        end
+        gc_setColor(r, g, b, 0.95)
+        gc_rectangle('fill', 0, 602, 300 * length, 5, 2)
+        -- Glowing edge
+        gc_setColor(r, g, b, 0.40)
+        gc_rectangle('line', -1, 601, 300 * length + 2, 7, 3)
     end
     if freshTime>0 then
         LDmarks:setDrawRange(1,min(freshTime,15))
@@ -769,16 +807,26 @@ local function _drawStartCounter(time)
         local num=floor(time/60)+1
         local d=time%60
         if num==3 then
-            r,g,b=.7,.8,.98
+            r,g,b=.35,.85,1.0
             if d>45 then gc_rotate((d-45)^2*.00355) end
         elseif num==2 then
-            r,g,b=.98,.85,.75
+            r,g,b=1.0,.85,.30
             if d>45 then gc_scale(1+(d/15-3)^2,1) end
         elseif num==1 then
-            r,g,b=1,.7,.7
+            r,g,b=1.0,.30,.45
             if d>45 then gc_scale(1,1+(d/15-3)^2) end
         end
         setFont(100)
+
+        -- osu! style expanding shockwave ring
+        local ringProgress = 1 - (d / 60)
+        gc_setColor(r, g, b, (d / 60) * 0.45)
+        gc_setLineWidth(3)
+        gc.circle('line', 0, -25, 40 + ringProgress * 110)
+
+        -- Soft shadow
+        gc_setColor(0, 0, 0, (d / 60) * 0.80)
+        GC.mStr(num, 3, -67)
 
         gc_setColor(r,g,b,d/60)
         gc_push('transform')
@@ -851,8 +899,8 @@ function draw.norm(P,repMode)
 
         -- Field-related things
         _applyField(P)
-            -- Fill field
-            gc_setColor(0,0,0,.6)
+            -- Fill field (dark obsidian glass)
+            gc_setColor(0.02, 0.04, 0.10, 0.85)
             gc_rectangle('fill',0,-10-camDY,300,610)
 
             -- Draw grid
@@ -976,6 +1024,25 @@ function draw.norm(P,repMode)
         gc_setStencilTest()
         gc_pop()
             -- Draw Frame and buffers
+            local b2bActive = P.b2b and P.b2b >= 50
+            local dangerActive = P.danger
+            local frameR, frameG, frameB = 0.20, 0.55, 0.95
+            if dangerActive then
+                frameR, frameG, frameB = 1.0, 0.25, 0.35
+            elseif b2bActive then
+                frameR, frameG, frameB = 1.0, 0.82, 0.25
+            end
+
+            -- Soft outer glow
+            gc_setLineWidth(4)
+            gc_setColor(frameR, frameG, frameB, 0.25)
+            gc_rectangle('line', -2, -2, 304, 604, 4)
+
+            -- Crisp neon outline
+            gc_setLineWidth(2)
+            gc_setColor(frameR, frameG, frameB, 0.75)
+            gc_rectangle('line', -1, -1, 302, 602, 3)
+
             gc_setColor(P.frameColor)
             gc_draw(playerborder,-17,-12)
             _drawBuffer(P.atkBuffer,ENV.bufferWarn,P.atkBufferSum1,P.atkBufferSum)
@@ -1021,16 +1088,54 @@ function draw.norm(P,repMode)
             --                                     gc_line(0,600-P.garbageBeneath*30,300,600-P.garbageBeneath*30)
         gc_pop()
 
-        -- Score & Time
-        setFont(25)
-        local tm=STRING.time(P.stat.time)
-        gc_setColor(0,0,0,.3)
-        gc_print(ceil(P.score1),18,509)
-        gc_print(tm,18,539)
-        gc_setColor(.97,.97,.92)
-        gc_print(ceil(P.score1),20,510)
-        gc_setColor(.85,.9,.97)
-        gc_print(tm,20,540)
+        -- Modern In-Game Statistics Cards (TETR.IO / osu! style)
+        local tm = STRING.time(P.stat.time)
+        local pps = (P.stat.time and P.stat.time > 0) and (P.stat.piece / P.stat.time) or 0
+
+        -- 1. TIME Card (x=12, y=472, w=100, h=40)
+        gc_setColor(0.04, 0.06, 0.14, 0.86)
+        gc_rectangle('fill', 12, 472, 100, 40, 6)
+        gc_setColor(1, 1, 1, 0.04)
+        gc_rectangle('fill', 14, 474, 96, 12, 4)
+        gc_setLineWidth(1)
+        gc_setColor(0.25, 0.55, 0.95, 0.65)
+        gc_rectangle('line', 12, 472, 100, 40, 6)
+        setFont(9)
+        gc_setColor(0.45, 0.78, 1.0, 0.90)
+        GC.mStr("TIME", 62, 475)
+        setFont(16)
+        gc_setColor(1, 1, 1, 0.98)
+        GC.mStr(tm, 62, 489)
+
+        -- 2. SPEED / PPS Card (x=12, y=518, w=100, h=40)
+        gc_setColor(0.04, 0.06, 0.14, 0.86)
+        gc_rectangle('fill', 12, 518, 100, 40, 6)
+        gc_setColor(1, 1, 1, 0.04)
+        gc_rectangle('fill', 14, 520, 96, 12, 4)
+        gc_setLineWidth(1)
+        gc_setColor(1.0, 0.80, 0.25, 0.65)
+        gc_rectangle('line', 12, 518, 100, 40, 6)
+        setFont(9)
+        gc_setColor(1.0, 0.85, 0.40, 0.90)
+        GC.mStr("PPS", 62, 521)
+        setFont(16)
+        gc_setColor(1, 1, 1, 0.98)
+        GC.mStr(string.format("%.2f", pps), 62, 535)
+
+        -- 3. SCORE Card (x=12, y=564, w=100, h=40)
+        gc_setColor(0.04, 0.06, 0.14, 0.86)
+        gc_rectangle('fill', 12, 564, 100, 40, 6)
+        gc_setColor(1, 1, 1, 0.04)
+        gc_rectangle('fill', 14, 566, 96, 12, 4)
+        gc_setLineWidth(1)
+        gc_setColor(0.25, 0.95, 0.60, 0.65)
+        gc_rectangle('line', 12, 564, 100, 40, 6)
+        setFont(9)
+        gc_setColor(0.45, 1.0, 0.70, 0.90)
+        GC.mStr("SCORE", 62, 567)
+        setFont(15)
+        gc_setColor(1, 1, 1, 0.98)
+        GC.mStr(tostring(ceil(P.score1)), 62, 581)
 
         -- FinesseCombo
         ;(P.type=='remote' and _drawFinesseCombo_remote or _drawFinesseCombo_norm)(P)

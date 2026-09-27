@@ -451,17 +451,36 @@ function scene.draw()
         end
     end
 
-    -- Mode info & Highscore & Current Rank
+    -- Mode info & Highscore & Current Rank (TETR.IO / osu! floating glass pill)
     local dy=SETTING.portrait and -390 or 0
-    gc_setColor(1,1,1,.82)
-    gc_draw(TEXTOBJ.modeName,modeTextPos,10+dy,0,modeTextWidK,1)
+    local modeW = TEXTOBJ.modeName:getWidth() * modeTextWidK
+    local pillW = modeW + 28
+    local pillX = modeTextPos - 14
+
+    -- Glass pill backing
+    gc_setColor(0.04, 0.06, 0.14, 0.85)
+    GC.rectangle('fill', pillX, 6 + dy, pillW, 36, 8)
+    gc_setColor(0.25, 0.55, 0.95, 0.60)
+    gc_setLineWidth(1.2)
+    GC.rectangle('line', pillX, 6 + dy, pillW, 36, 8)
+
+    gc_setColor(1, 1, 1, 0.98)
+    gc_draw(TEXTOBJ.modeName, modeTextPos, 10 + dy, 0, modeTextWidK, 1)
+
     if not replaying then
         local M=GAME.curMode
         if M then
             if M.score and M.records[1] then
-                setFont(15)
-                gc_setColor(1,1,1,.6)
-                gc_print(M.scoreDisp(M.records[1]),modeTextPos,45+dy)
+                local pbStr = M.scoreDisp(M.records[1])
+                local pbW = FONT.get(13):getWidth(pbStr) + 20
+                gc_setColor(0.06, 0.08, 0.16, 0.85)
+                GC.rectangle('fill', pillX, 46 + dy, pbW, 22, 5)
+                gc_setColor(1.0, 0.80, 0.25, 0.70)
+                gc_setLineWidth(1)
+                GC.rectangle('line', pillX, 46 + dy, pbW, 22, 5)
+                setFont(11)
+                gc_setColor(1.0, 0.85, 0.35, 0.95)
+                gc_print("PB: " .. pbStr, pillX + 6, 49 + dy)
             end
             if M.getRank then
                 local R=M.getRank(PLAYERS[1])
@@ -496,8 +515,8 @@ scene.widgetList={
     WIDGET.newKey   {name='rep5',    x=365,y=50, w=60, code=_rep5,    font=40,          fText=CHAR.icon.speedFive},      -- 6
     WIDGET.newKey   {name='step',    x=40, y=50, w=60, code=_step,    font=40,          fText=CHAR.icon.nextFrame},      -- 7
     WIDGET.newSlider{name='autoSkip',x=40, y=130,w=100,code=_setAS,   axis={0,2,1},     disp=function()return autoSkip end,show=_autoSkipDisp},
-    WIDGET.newKey   {name='restart', x=0,  y=25, w=60, code=_restart, font=40,          fText=CHAR.icon.retry_spin},     -- 10
-    WIDGET.newKey   {name='pause',   x=0,  y=25, w=60, code=pauseGame,font=40,          fText=CHAR.icon.pause},          -- 11
+    WIDGET.newKey   {name='restart', x=0,  y=25, w=60, color='lY',   code=_restart,   font=40,          fText=CHAR.icon.retry_spin},     -- 10
+    WIDGET.newKey   {name='pause',   x=0,  y=25, w=60, color='lB',   code=pauseGame,  font=40,          fText=CHAR.icon.pause},          -- 11
 }
 
 return scene

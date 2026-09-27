@@ -33,18 +33,39 @@ function scene.draw()
     -- Game scene
     SCN.scenes.game.draw()
 
-    -- Gray screen cover
-    gc.setColor(.12,.12,.12,timer*8-7)
+    -- Dark screen cover
+    local coverAlpha=math.max(0,timer*8-7)*0.88
+    gc.setColor(0.02,0.04,0.08,coverAlpha)
     gc.replaceTransform(SCR.origin)
     gc.rectangle('fill',0,0,SCR.w,SCR.h)
     gc.replaceTransform(SCR.xOy)
 
-    -- Counter bar
-    gc.setLineWidth(2)
-    gc.setColor(.9,.9,.9,math.min(1,12*timer,8*(1-timer))*.6)
-    gc.rectangle('line',494,336,292,48,14)
-    gc.setColor(.9,.9,.9,math.min(1,12*timer,8*(1-timer))*.75)
-    gc.rectangle('fill',500,342,280*timer,36,10)
+    -- Cyber Depause Counter bar
+    local a=math.min(1,12*timer,8*(1-timer))
+    if a>0 then
+        -- Track backing
+        gc.setColor(0.04,0.08,0.18,a*0.90)
+        gc.rectangle('fill',494,336,292,48,14)
+        -- Glow outline
+        gc.setLineWidth(2)
+        gc.setColor(0.25,0.65,1.0,a*0.85)
+        gc.rectangle('line',494,336,292,48,14)
+        -- Filled progress bar
+        local barW=math.max(0,280*timer)
+        if barW>0 then
+            gc.setColor(0.20,0.60,0.95,a*0.90)
+            gc.rectangle('fill',500,342,barW,36,10)
+            -- Top sheen
+            gc.setColor(1,1,1,a*0.12)
+            gc.rectangle('fill',500,342,barW,14,8)
+        end
+        -- High contrast label
+        FONT.set(16)
+        gc.setColor(0,0,0,a*0.75)
+        GC.mStr("RESUMING",641,351)
+        gc.setColor(1,1,1,a)
+        GC.mStr("RESUMING",640,350)
+    end
 end
 
 scene.widgetList={
