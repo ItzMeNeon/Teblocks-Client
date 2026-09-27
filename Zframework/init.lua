@@ -322,6 +322,7 @@ function love.touchmoved(id,x,y,dx,dy)
     if WAIT.state or SCN.swapping then return end
     local vx,vy=ITP(xOy,x,y)
     if SETTINGS and SETTINGS.isOpen and SETTINGS.touchMove and SETTINGS.touchMove(id,vx,vy,dx/SCR.k,dy/SCR.k) then return end
+    if MES and MES.touchMove and MES.touchMove(id,x,y,dx,dy) then return end
     if CHAT and CHAT.isOpen and CHAT.touchMove and CHAT.touchMove(id,vx,vy,dx/SCR.k,dy/SCR.k) then return end
     if SCN.touchMove then SCN.touchMove(vx,vy,dx/SCR.k,dy/SCR.k,id) end
     WIDGET.drag(vx,vy,dx/SCR.k,dy/SCR.k)
@@ -330,6 +331,7 @@ function love.touchreleased(id,x,y)
     if WAIT.state or SCN.swapping then return end
     local vx,vy=ITP(xOy,x,y)
     if SETTINGS and SETTINGS.isOpen and SETTINGS.touchUp and SETTINGS.touchUp(id,vx,vy) then return end
+    if MES and MES.touchUp and MES.touchUp(id,x,y) then return end
     if CHAT and CHAT.isOpen and CHAT.touchUp and CHAT.touchUp(id,vx,vy) then return end
     if id==SCN.mainTouchID then
         WIDGET.release(vx,vy,1)

@@ -2588,24 +2588,31 @@ local function _updateMisc(P,dt)
         end
     end
 
-    -- Move camera (scroll board down when stack or active piece exceeds visible limit)
+    -- Move camera (when 3-1 lines close to top out, board smoothly slides down like 4 lines)
     if P.gameEnv.highCam or SETTING.highCam ~= false then
         if not P.alive then
-            y=0
+            y = 0
         else
-            local limit = P.gameEnv.fieldH or 20
-            local stackHigh = #P.field - 18.5 - P.fieldBeneath / 30
-            local pieceHigh = 0
-            if #P.field > 17 or (P.ghoY and P.ghoY > 17) then
-                local py = (P.cur and P.curY) or (P.ghoY or 0)
-                pieceHigh = py - 17
+            local topOut = P.gameEnv.fieldH or 20
+            local stackHeight = #P.field + (P.fieldBeneath or 0) / 30
+            local linesClose = topOut - stackHeight
+
+            local slideLines = 0
+            if linesClose <= 3.5 then
+                -- 3-1 lines close to top out (row 17, 18, 19, 20):
+                -- Progressively slide down 4 lines to reveal beyond ceiling
+                local progress = math.min(math.max((3.5 - linesClose) / 2.5, 0), 1)
+                local baseSlide = progress * 4
+                -- If stack or active piece exceeds topOut, slide down further to show pieces
+                local overflow = math.max(stackHeight - topOut, 0)
+                local pieceOverflow = (P.cur and P.curY and P.curY > topOut) and (P.curY - topOut) or 0
+                slideLines = math.max(baseSlide + overflow, pieceOverflow)
             end
-            local targetY = max(stackHigh, pieceHigh, 0)
-            y = 30 * min(targetY, max(limit - 5, 15))
+            y = 30 * min(slideLines, max(topOut - 5, 15))
         end
-        local f=P.fieldUp
-        if f~=y then
-            P.fieldUp=f>y and max(approach(f,y,dt*6)-2,y) or min(approach(f,y,dt*3)+1,y)
+        local f = P.fieldUp
+        if f ~= y then
+            P.fieldUp = f > y and max(approach(f, y, dt * 6) - 2, y) or min(approach(f, y, dt * 4) + 1, y)
         end
     end
 

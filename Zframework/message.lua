@@ -241,18 +241,33 @@ function MES.new(icon, str, time)
     end
 end
 
+local dragToast = nil
+local pressX, pressY = 0, 0
+local dragOffsetX, dragOffsetY = 0, 0
+local lastDragX, lastDragY = 0, 0
+local lastDragTime = 0
+local dragVx, dragVy = 0, 0
+local activeDragTouchId = nil
+
 function MES.yeet(idx, flickVx, flickVy)
     local m = mesList[idx]
     if not m or m.yeeted then return end
     m.yeeted = true
-    local screenW = SCR.w > 0 and (SCR.w / SCR.k) or 1280
-    m.targetX = screenW + m.w + 60
-    m.endTime = 0.4
-    if flickVx and math.abs(flickVx) > 50 then
-        m.vx = flickVx
-        m.vy = flickVy or -100
-        m.rotSpeed = (flickVx > 0 and 1 or -1) * 6
+    m.isDragged = false
+    m.startTime = 0
+    m.time = 0
+    m.endTime = 0.8
+
+    local vx = flickVx
+    local vy = flickVy
+    if not vx or (math.abs(vx) < 50 and (not vy or math.abs(vy) < 50)) then
+        vx = (math.random() > 0.5 and 1 or -1) * math.random(1100, 1600)
+        vy = math.random(-420, -180)
     end
+    m.vx = vx
+    m.vy = vy or -100
+    m.rotSpeed = (vx > 0 and 1 or -1) * math.random(7, 14)
+
     if SFX and SFX.play then
         pcall(SFX.play, 'reach')
     end
@@ -311,12 +326,26 @@ function MES.mouseDown(rawX, rawY, k)
         end
     end
 
-    -- 3. Check Live Toast Toasts: click anywhere on the toast instantly yeets it!
+    -- 3. Check Live Toast Toasts: hold and drag to yeet anywhere (osu!lazer style)
     for i = 1, #mesList do
         local m = mesList[i]
         if not m.yeeted then
             if mx >= m.x and mx <= m.x + m.w and my >= m.y and my <= m.y + m.h then
-                MES.yeet(i, 560, -90)
+                -- Close button '✕'
+                if mx >= m.x + m.w - 32 and mx <= m.x + m.w - 8 and my >= m.y + 8 and my <= m.y + 32 then
+                    MES.yeet(i)
+                    return true
+                end
+
+                dragToast = i
+                activeDragTouchId = nil
+                m.isDragged = true
+                pressX, pressY = mx, my
+                dragOffsetX = mx - m.x
+                dragOffsetY = my - m.y
+                lastDragX, lastDragY = mx, my
+                lastDragTime = love.timer.getTime()
+                dragVx, dragVy = 0, 0
                 return true
             end
         end
@@ -328,6 +357,23 @@ end
 function MES.mouseMove(rawX, rawY, dx, dy)
     local mx, my = _getCoord(rawX, rawY)
     local screenW = SCR.w > 0 and (SCR.w / (SCR.k > 0 and SCR.k or 1)) or 1280
+
+    if dragToast and mesList[dragToast] then
+        local m = mesList[dragToast]
+        m.x = mx - dragOffsetX
+        m.y = my - dragOffsetY
+        local now = love.timer.getTime()
+        local dt = now - lastDragTime
+        if dt > 0.001 then
+            dragVx = (mx - lastDragX) / dt
+            dragVy = (my - lastDragY) / dt
+            m.dragVx = dragVx
+            m.dragVy = dragVy
+            lastDragX, lastDragY = mx, my
+            lastDragTime = now
+        end
+        return true
+    end
 
     -- Check tab hover
     local tabW, tabH = 36, 85
@@ -343,6 +389,38 @@ function MES.mouseMove(rawX, rawY, dx, dy)
 end
 
 function MES.mouseUp(rawX, rawY, k)
+    if dragToast then
+        local idx = dragToast
+        dragToast = nil
+        local m = mesList[idx]
+        if m and not m.yeeted then
+            m.isDragged = false
+            local mx, my = _getCoord(rawX, rawY)
+            local totalDx = mx - pressX
+            local totalDy = my - pressY
+            local dist = math.sqrt(totalDx * totalDx + totalDy * totalDy)
+            local flickSpeed = math.sqrt(dragVx * dragVx + dragVy * dragVy)
+
+            if flickSpeed > 200 or dist > 15 then
+                local vx = dragVx
+                local vy = dragVy
+                if math.abs(vx) < 150 and math.abs(vy) < 150 then
+                    vx = totalDx * 16
+                    vy = totalDy * 16
+                end
+                local spd = math.sqrt(vx * vx + vy * vy)
+                if spd < 700 then
+                    local scale = 700 / (spd > 0 and spd or 1)
+                    vx = vx * scale
+                    vy = vy * scale
+                end
+                MES.yeet(idx, vx, vy)
+            else
+                MES.yeet(idx)
+            end
+            return true
+        end
+    end
     return false
 end
 
@@ -393,17 +471,53 @@ function MES.touchDown(id, rawX, rawY)
         end
     end
 
-    -- 3. Live Toasts: tap to instantly yeet
+    -- 3. Live Toasts: touch & drag to yeet
     for i = 1, #mesList do
         local m = mesList[i]
         if not m.yeeted then
             if mx >= m.x and mx <= m.x + m.w and my >= m.y and my <= m.y + m.h then
-                MES.yeet(i, 560, -90)
+                dragToast = i
+                activeDragTouchId = id
+                m.isDragged = true
+                pressX, pressY = mx, my
+                dragOffsetX = mx - m.x
+                dragOffsetY = my - m.y
+                lastDragX, lastDragY = mx, my
+                lastDragTime = love.timer.getTime()
+                dragVx, dragVy = 0, 0
                 return true
             end
         end
     end
 
+    return false
+end
+
+function MES.touchMove(id, rawX, rawY, dx, dy)
+    if dragToast and (not activeDragTouchId or activeDragTouchId == id) and mesList[dragToast] then
+        local mx, my = _getCoord(rawX, rawY)
+        local m = mesList[dragToast]
+        m.x = mx - dragOffsetX
+        m.y = my - dragOffsetY
+        local now = love.timer.getTime()
+        local dt = now - lastDragTime
+        if dt > 0.001 then
+            dragVx = (mx - lastDragX) / dt
+            dragVy = (my - lastDragY) / dt
+            m.dragVx = dragVx
+            m.dragVy = dragVy
+            lastDragX, lastDragY = mx, my
+            lastDragTime = now
+        end
+        return true
+    end
+    return false
+end
+
+function MES.touchUp(id, rawX, rawY)
+    if dragToast and (not activeDragTouchId or activeDragTouchId == id) then
+        return MES.mouseUp(rawX, rawY, 1)
+    end
     return false
 end
 
@@ -450,24 +564,28 @@ function MES.update(dt)
     local curY = 75
     for i = #mesList, 1, -1 do
         local m = mesList[i]
-        if m.yeeted then
+        if m.isDragged then
+            -- While holding and dragging notification bar (osu!lazer)
+            local targetRot = math.max(-0.25, math.min(0.25, (m.dragVx or 0) * 0.0004))
+            m.rot = MATH.expApproach(m.rot, targetRot, dt * 20)
+        elseif m.yeeted then
             if m.vx ~= 0 or m.vy ~= 0 then
                 m.x = m.x + m.vx * dt
-                m.vy = m.vy + 1800 * dt
+                m.vy = m.vy + 2000 * dt -- gravity
                 m.y = m.y + m.vy * dt
                 m.rot = m.rot + m.rotSpeed * dt
             else
                 m.x = MATH.expApproach(m.x, m.targetX, dt * 16)
             end
             m.endTime = m.endTime - dt
-            if m.endTime <= 0 or m.x > screenW + 200 then
+            if m.endTime <= 0 or m.y > screenH + 400 or m.y < -400 or m.x < -600 or m.x > screenW + 600 then
                 rem(mesList, i)
             end
         else
             if m.startTime > 0 then
                 m.startTime = max(0, m.startTime - dt)
             elseif not m.hovered then
-                -- Only decrement timer when not hovered so player can read comfortably
+                -- Only decrement timer when not hovered/dragged so player can read comfortably
                 m.time = max(0, m.time - dt)
                 if m.time <= 0 then
                     MES.yeet(i)
@@ -480,6 +598,7 @@ function MES.update(dt)
 
             m.x = MATH.expApproach(m.x, targetX, dt * 18)
             m.y = MATH.expApproach(m.y, targetY, dt * 18)
+            m.rot = MATH.expApproach(m.rot, 0, dt * 18)
         end
     end
 end
