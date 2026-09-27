@@ -145,6 +145,7 @@ local function _newEmptyPlayer(id,mini)
     -- Game states
     P.combo=0
     P.b2b,P.b2b1=0,0-- B2B point & Displayed B2B point
+    P.b2bChain=0-- Consecutive Back-to-Back clear chain count
     P.score1=0-- Displayed score
     P.pieceCount=0-- Count pieces from next, for drawing bagline
     P.finesseCombo,P.finesseComboTime=0,0

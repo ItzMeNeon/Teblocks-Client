@@ -114,7 +114,70 @@ function SETTINGS.scrollTo(cat)
     end
 end
 
+local function _getCoord(rawX, rawY, isVirtual)
+    if isVirtual then return rawX, rawY end
+    if SCR and SCR.xOy then
+        return SCR.xOy:inverseTransformPoint(rawX, rawY)
+    end
+    local kScale = (SCR.k > 0 and SCR.k or 1)
+    return rawX / kScale, rawY / kScale
+end
+
+local touchStartY = nil
+local touchStartScroll = nil
+local touchMovedDist = 0
+local activeTouchId = nil
+local isTouchDragging = false
+
+function SETTINGS.touchDown(id, x, y)
+    if not SETTINGS.isOpen or SETTINGS.x < -SETTINGS.w + 10 then return false end
+    if x > SETTINGS.x + SETTINGS.w then
+        SETTINGS.close()
+        return true
+    end
+    activeTouchId = id
+    touchStartY = y
+    touchStartScroll = SETTINGS.scrollTarget
+    touchMovedDist = 0
+    isTouchDragging = false
+    return true
+end
+
+function SETTINGS.touchMove(id, x, y, dx, dy)
+    if not SETTINGS.isOpen or activeTouchId ~= id or not touchStartY then return false end
+    local deltaY = y - touchStartY
+    touchMovedDist = touchMovedDist + math.abs(deltaY)
+    if touchMovedDist > 6 then
+        isTouchDragging = true
+        SETTINGS.scrollTarget = max(0, min(touchStartScroll - deltaY * 1.15, SETTINGS.maxScroll))
+        SETTINGS.scrollY = SETTINGS.scrollTarget
+        return true
+    end
+    return true
+end
+
+function SETTINGS.touchUp(id, x, y)
+    if not SETTINGS.isOpen or activeTouchId ~= id then return false end
+    activeTouchId = nil
+    if not isTouchDragging and touchMovedDist <= 6 then
+        SETTINGS.mouseClick(x, y, 1, true)
+    end
+    touchStartY = nil
+    touchStartScroll = nil
+    touchMovedDist = 0
+    isTouchDragging = false
+    return true
+end
+
 function SETTINGS.update(dt)
+    -- Dynamic width adapting to mobile/narrow screens
+    local screenW = SCR.w > 0 and (SCR.w / (SCR.k > 0 and SCR.k or 1)) or 1280
+    if screenW < 560 then
+        SETTINGS.w = screenW
+    else
+        SETTINGS.w = 500
+    end
+
     -- Drawer slide animation
     SETTINGS.targetX = SETTINGS.isOpen and 0 or -SETTINGS.w
     SETTINGS.x = MATH.expApproach(SETTINGS.x, SETTINGS.targetX, dt * 18)
@@ -142,10 +205,10 @@ function SETTINGS.update(dt)
 
         -- Handle active slider drag
         if SETTINGS.activeSlider and love.mouse.isDown(1) then
-            local kScale = (SCR.k > 0 and SCR.k or 1)
-            local mx = love.mouse.getX() / kScale
-            local contentLeft = SETTINGS.x + 70
-            local contentW = SETTINGS.w - 70 - 24
+            local mx, my = _getCoord(love.mouse.getX(), love.mouse.getY())
+            local barW = SETTINGS.w < 500 and 52 or 64
+            local contentLeft = SETTINGS.x + barW + 6
+            local contentW = SETTINGS.w - barW - 18
             local v = max(0, min(1, (mx - (contentLeft + 16)) / (contentW - 32)))
 
             if SETTINGS.activeSlider == 'mainVol' then
@@ -171,9 +234,7 @@ function SETTINGS.update(dt)
 end
 
 function SETTINGS.wheelMoved(x, y)
-    local kScale = (SCR.k > 0 and SCR.k or 1)
-    local mx = love.mouse.getX() / kScale
-
+    local mx, my = _getCoord(love.mouse.getX(), love.mouse.getY())
     if SETTINGS.isOpen and mx >= SETTINGS.x and mx <= SETTINGS.x + SETTINGS.w then
         SETTINGS.scrollTarget = max(0, min(SETTINGS.scrollTarget - y * 65, SETTINGS.maxScroll))
         return true
@@ -181,12 +242,11 @@ function SETTINGS.wheelMoved(x, y)
     return false
 end
 
-function SETTINGS.mouseClick(rawX, rawY, k)
-    local kScale = (SCR.k > 0 and SCR.k or 1)
-    local mx = rawX / kScale
-    local my = rawY / kScale
-    local screenW = SCR.w > 0 and (SCR.w / SCR.k) or 1280
-    local screenH = SCR.h > 0 and (SCR.h / SCR.k) or 720
+function SETTINGS.mouseClick(rawX, rawY, k, isVirtual)
+    local mx, my = _getCoord(rawX, rawY, isVirtual)
+    local screenW = SCR.w > 0 and (SCR.w / (SCR.k > 0 and SCR.k or 1)) or 1280
+    local screenH = SCR.h > 0 and (SCR.h / (SCR.k > 0 and SCR.k or 1)) or 720
+    local barW = SETTINGS.w < 500 and 52 or 64
 
     if not SETTINGS.isOpen or SETTINGS.x < -SETTINGS.w + 10 then return false end
 
@@ -197,14 +257,14 @@ function SETTINGS.mouseClick(rawX, rawY, k)
     end
 
     -- 1. Close button in header (top-right of sidebar)
-    if mx >= SETTINGS.x + SETTINGS.w - 38 and mx <= SETTINGS.x + SETTINGS.w - 10 and my >= 12 and my <= 42 then
+    if mx >= SETTINGS.x + SETTINGS.w - 44 and mx <= SETTINGS.x + SETTINGS.w - 6 and my >= 8 and my <= 48 then
         SETTINGS.close()
         if SFX and SFX.play then pcall(SFX.play, 'click') end
         return true
     end
 
-    -- 2. Left Category Toolbar Click (x = SETTINGS.x .. SETTINGS.x + 64)
-    if mx >= SETTINGS.x and mx <= SETTINGS.x + 64 then
+    -- 2. Left Category Toolbar Click (x = SETTINGS.x .. SETTINGS.x + barW)
+    if mx >= SETTINGS.x and mx <= SETTINGS.x + barW then
         local catY = 70
         for _, cat in ipairs(SETTINGS.categories) do
             if my >= catY and my <= catY + 62 then
@@ -216,9 +276,9 @@ function SETTINGS.mouseClick(rawX, rawY, k)
         return true
     end
 
-    -- 3. Content Area Click (x = SETTINGS.x + 64 .. SETTINGS.x + SETTINGS.w)
-    local contentX = SETTINGS.x + 70
-    local contentW = SETTINGS.w - 70 - 24
+    -- 3. Content Area Click (x = SETTINGS.x + barW .. SETTINGS.x + SETTINGS.w)
+    local contentX = SETTINGS.x + barW + 6
+    local contentW = SETTINGS.w - barW - 18
     local sy = my - 60 + SETTINGS.scrollY
 
     -- === GAMEPLAY SECTION ===
@@ -624,34 +684,33 @@ end
 function SETTINGS.draw()
     if SETTINGS.x <= -SETTINGS.w then return end
 
-    local screenW = SCR.w > 0 and (SCR.w / SCR.k) or 1280
-    local screenH = SCR.h > 0 and (SCR.h / SCR.k) or 720
+    local screenW = SCR.w > 0 and (SCR.w / (SCR.k > 0 and SCR.k or 1)) or 1280
+    local screenH = SCR.h > 0 and (SCR.h / (SCR.k > 0 and SCR.k or 1)) or 720
     local kScale = (SCR.k > 0 and SCR.k or 1)
-    local mx = love.mouse.getX() / kScale
-    local my = love.mouse.getY() / kScale
+    local mx, my = _getCoord(love.mouse.getX(), love.mouse.getY())
 
     -- Dimmed backdrop
     local openRatio = (SETTINGS.w + SETTINGS.x) / SETTINGS.w
-    GC.setColor(0, 0, 0, 0.45 * openRatio)
+    GC.setColor(0, 0, 0, 0.55 * openRatio)
     GC.rectangle('fill', 0, 0, screenW, screenH)
 
     GC.push('transform')
     GC.translate(SETTINGS.x, 0)
 
-    -- Sidebar background
-    GC.setColor(0.08, 0.09, 0.13, 0.97)
+    -- Sidebar obsidian background
+    GC.setColor(0.04, 0.07, 0.14, 0.98)
     GC.rectangle('fill', 0, 0, SETTINGS.w, screenH)
 
-    -- Right glowing border
-    GC.setColor(0.98, 0.55, 0.20, 0.85)
+    -- Right glowing neon border
+    GC.setColor(0.25, 0.65, 1.0, 0.85)
     GC.rectangle('fill', SETTINGS.w - 3, 0, 3, screenH)
 
-    -- ════════════════ LEFT CATEGORY TOOLBAR (osu!-style) ════════════════
-    local barW = 64
-    GC.setColor(0.11, 0.12, 0.18, 0.98)
+    -- ════════════════ LEFT CATEGORY TOOLBAR (TETR.IO / osu!-style) ════════════════
+    local barW = SETTINGS.w < 500 and 52 or 64
+    GC.setColor(0.06, 0.10, 0.18, 0.98)
     GC.rectangle('fill', 0, 0, barW, screenH)
 
-    GC.setColor(0.25, 0.28, 0.38, 0.5)
+    GC.setColor(0.20, 0.40, 0.70, 0.45)
     GC.setLineWidth(1)
     GC.line(barW, 0, barW, screenH)
 
@@ -662,32 +721,32 @@ function SETTINGS.draw()
         local isHov = (mx >= SETTINGS.x and mx <= SETTINGS.x + barW and my >= catY and my <= catY + 62)
 
         if isActive then
-            GC.setColor(0.98, 0.55, 0.20, 0.95)
+            GC.setColor(0.30, 0.75, 1.0, 0.95)
             GC.rectangle('fill', 0, catY, 4, 62, 0, 2, 2, 0)
-            GC.setColor(0.20, 0.22, 0.32, 0.95)
+            GC.setColor(0.12, 0.22, 0.40, 0.95)
             GC.rectangle('fill', 4, catY, barW - 4, 62)
         elseif isHov then
-            GC.setColor(0.16, 0.18, 0.26, 0.9)
+            GC.setColor(0.10, 0.16, 0.28, 0.9)
             GC.rectangle('fill', 0, catY, barW, 62)
         end
 
         -- Icon & Label
-        FONT.set(20)
+        FONT.set(barW < 60 and 18 or 20)
         GC.setColor(1, 1, 1, isActive and 1.0 or (isHov and 0.9 or 0.65))
         GC.printf(cat.icon, 0, catY + 8, barW, 'center')
 
-        FONT.set(10)
-        GC.setColor(isActive and {0.98, 0.65, 0.25, 1.0} or {0.60, 0.65, 0.75, 0.75})
+        FONT.set(barW < 60 and 9 or 10)
+        GC.setColor(isActive and {0.40, 0.85, 1.0, 1.0} or {0.60, 0.70, 0.85, 0.75})
         GC.printf(cat.label, 0, catY + 36, barW, 'center')
 
         catY = catY + 70
     end
 
     -- ════════════════ HEADER AREA ════════════════
-    GC.setColor(0.12, 0.14, 0.20, 0.98)
+    GC.setColor(0.06, 0.11, 0.20, 0.98)
     GC.rectangle('fill', barW, 0, SETTINGS.w - barW, 55)
 
-    GC.setColor(0.25, 0.28, 0.38, 0.5)
+    GC.setColor(0.25, 0.55, 0.95, 0.6)
     GC.line(barW, 55, SETTINGS.w, 55)
 
     FONT.set(18)
@@ -695,7 +754,7 @@ function SETTINGS.draw()
     GC.print("⚙️ SETTINGS", barW + 16, 17)
 
     FONT.set(11)
-    GC.setColor(0.55, 0.60, 0.72, 0.75)
+    GC.setColor(0.55, 0.70, 0.90, 0.75)
     GC.print("[Ctrl+O / ESC]", SETTINGS.w - 145, 21)
 
     -- Close '✕' Button
@@ -720,12 +779,12 @@ function SETTINGS.draw()
 
     -- Helper: Draw Section Header
     local function drawSectionHeader(title, icon, y)
-        GC.setColor(0.98, 0.55, 0.20, 0.95)
+        GC.setColor(0.25, 0.70, 1.0, 0.95)
         GC.rectangle('fill', contentX + 6, y, 4, 22, 2)
         FONT.set(15)
         GC.setColor(1, 1, 1, 0.98)
         GC.print(icon .. "  " .. title, contentX + 16, y + 2)
-        GC.setColor(0.25, 0.28, 0.38, 0.4)
+        GC.setColor(0.20, 0.40, 0.70, 0.45)
         GC.line(contentX + 16, y + 28, contentX + contentW - 10, y + 28)
     end
 

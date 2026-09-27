@@ -1043,8 +1043,6 @@ function draw.norm(P,repMode)
             gc_setColor(frameR, frameG, frameB, 0.75)
             gc_rectangle('line', -1, -1, 302, 602, 3)
 
-            gc_setColor(P.frameColor)
-            gc_draw(playerborder,-17,-12)
             _drawBuffer(P.atkBuffer,ENV.bufferWarn,P.atkBufferSum1,P.atkBufferSum)
             _drawB2Bbar(P.b2b,P.b2b1)
             _drawLDI(ENV.easyFresh,P.lockDelay/ENV.lock,P.freshTime)
@@ -1079,18 +1077,51 @@ function draw.norm(P,repMode)
 
             -- Bonus texts
             TEXT.draw(P.bonus)
-
-            -- Display Ys
-            -- gc_setLineWidth(6)
-            -- if P.curY then gc_setColor(COLOR.R)gc_line(0,611-P.curY*30,300,610-P.curY*30) end
-            -- if P.ghoY then gc_setColor(COLOR.G)gc_line(0,615-P.ghoY*30,300,615-P.ghoY*30) end
-            -- if P.minY then gc_setColor(COLOR.B)gc_line(0,619-P.minY*30,300,620-P.minY*30) end
-            --                                     gc_line(0,600-P.garbageBeneath*30,300,600-P.garbageBeneath*30)
         gc_pop()
 
         -- Modern In-Game Statistics Cards (TETR.IO / osu! style)
         local tm = STRING.time(P.stat.time)
         local pps = (P.stat.time and P.stat.time > 0) and (P.stat.piece / P.stat.time) or 0
+
+        -- B2B Counter (TETR.IO style on top of stats on the bottom left)
+        if P.b2b and P.b2b >= 50 then
+            local chain = max(1, P.b2bChain or 1)
+            local isMega = P.b2b > 800
+            local pulse = 0.85 + 0.15 * sin(TIME() * 7)
+            local r, g, b = 1.0, 0.80, 0.22
+            if isMega then
+                r, g, b = 0.25, 0.85, 1.0
+            end
+
+            -- Ambient glow halo
+            gc_setColor(r, g, b, 0.18 * pulse)
+            gc_rectangle('fill', 9, 421, 106, 46, 8)
+
+            -- Obsidian glass fill
+            gc_setColor(0.04, 0.06, 0.14, 0.92)
+            gc_rectangle('fill', 12, 424, 100, 42, 6)
+
+            -- Glowing outer border
+            gc_setLineWidth(1.8)
+            gc_setColor(r * pulse, g * pulse, b * pulse, 0.88)
+            gc_rectangle('line', 12, 424, 100, 42, 6)
+
+            -- Top sheen
+            gc_setColor(1, 1, 1, 0.08)
+            gc_rectangle('fill', 14, 426, 96, 12, 4)
+
+            -- Header: B2B or B3B
+            setFont(9)
+            gc_setColor(r, g, b, 0.95)
+            GC.mStr(isMega and "⚡ MEGA B2B" or "⚡ B2B CHAIN", 62, 427)
+
+            -- Big Chain / Counter Text
+            setFont(16)
+            gc_setColor(0, 0, 0, 0.8)
+            GC.mStr(string.format("B2B x%d", chain), 63, 442)
+            gc_setColor(1, 1, 1, 1.0)
+            GC.mStr(string.format("B2B x%d", chain), 62, 441)
+        end
 
         -- 1. TIME Card (x=12, y=472, w=100, h=40)
         gc_setColor(0.04, 0.06, 0.14, 0.86)

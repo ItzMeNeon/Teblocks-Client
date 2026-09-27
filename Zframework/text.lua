@@ -138,6 +138,18 @@ function TEXT.update(dt,list)
         end
     end
 end
+local function _drawWhiteSparkle(x, y, size, a)
+    if a <= 0.02 or size <= 0.5 then return end
+    setColor(1, 1, 1, a)
+    GC.setLineWidth(1.2)
+    GC.line(x - size, y, x + size, y)
+    GC.line(x, y - size, x, y + size)
+    local diag = size * 0.45
+    GC.line(x - diag, y - diag, x + diag, y + diag)
+    GC.line(x - diag, y + diag, x + diag, y - diag)
+    GC.circle('fill', x, y, size * 0.28)
+end
+
 function TEXT.draw(list)
     if not list then
         list=texts
@@ -157,6 +169,30 @@ function TEXT.draw(list)
         -- Crisp gleaming foreground text
         setColor(1, 1, 1, alpha)
         t:draw()
+
+        -- Dynamic white sparkles (osu! / TETR.IO anime combat text sparkles)
+        if alpha > 0.1 and p < 0.85 and t.text then
+            local tw = t.text:getWidth()
+            local th = t.text:getHeight()
+            local spLocs = {
+                { -tw * 0.48, -th * 0.38, 0.0, 7.5 },
+                {  tw * 0.46, -th * 0.32, 0.2, 8.0 },
+                { -tw * 0.28,  th * 0.42, 0.4, 6.5 },
+                {  tw * 0.36,  th * 0.38, 0.6, 7.0 },
+                {  tw * 0.05, -th * 0.48, 0.8, 6.0 },
+                { -tw * 0.44,  th * 0.22, 0.3, 5.5 },
+            }
+            for sIdx = 1, #spLocs do
+                local sp = spLocs[sIdx]
+                local sPhase = (p * 4.5 + sp[3]) % 1.0
+                if sPhase < 0.65 then
+                    local sProg = sPhase / 0.65
+                    local sSize = math.sin(sProg * math.pi) * sp[4]
+                    local sAlpha = math.sin(sProg * math.pi) * alpha * 0.95
+                    _drawWhiteSparkle(t.x + sp[1], t.y + sp[2], sSize, sAlpha)
+                end
+            end
+        end
     end
 end
 return TEXT

@@ -2051,6 +2051,7 @@ do
                     exblock=exblock+1
                     cscore=cscore*2
                     Stat.b3b=Stat.b3b+1
+                    self.b2bChain=(self.b2bChain or 0)+1
                     if self.sound then
                         VOC.play('b3b',CHN)
                     end
@@ -2060,6 +2061,7 @@ do
                     atk=b2bATK[cc]
                     cscore=cscore*1.2
                     Stat.b2b=Stat.b2b+1
+                    self.b2bChain=(self.b2bChain or 0)+1
                     if self.sound then
                         VOC.play('b2b',CHN)
                     end
@@ -2067,6 +2069,7 @@ do
                     self:showText(text.block[C.name]..text.spin..text.clear[cc],0,-30,45,'spin')
                     yomi=yomi..text.block[C.name]..text.spin..text.clear[cc]
                     atk=2*cc
+                    if (self.b2bChain or 0)==0 then self.b2bChain=1 end
                 end
                 sendTime=20+atk*20
                 if mini then
@@ -2098,6 +2101,7 @@ do
                     exblock=exblock+1
                     cscore=cscore*1.8
                     Stat.b3b=Stat.b3b+1
+                    self.b2bChain=(self.b2bChain or 0)+1
                     if self.sound then
                         VOC.play('b3b',CHN)
                     end
@@ -2108,6 +2112,7 @@ do
                     atk=3*cc-7
                     cscore=cscore*1.3
                     Stat.b2b=Stat.b2b+1
+                    self.b2bChain=(self.b2bChain or 0)+1
                     if self.sound then
                         VOC.play('b2b',CHN)
                     end
@@ -2116,6 +2121,7 @@ do
                     yomi=text.clear[cc]..yomi
                     sendTime=60
                     atk=2*cc-4
+                    if (self.b2bChain or 0)==0 then self.b2bChain=1 end
                 end
                 self.b2b=self.b2b+cc*50-50
                 piece.special=true
@@ -2183,6 +2189,7 @@ do
 
             if not piece.special then
                 self.b2b=max(self.b2b-250,0)
+                if self.b2b==0 then self.b2bChain=0 end
             end
 
             if self.b2b>1000 then
@@ -3145,6 +3152,7 @@ function Player:_die()
     self.control=false
     self.waiting=1e99
     self.b2b=0
+    self.b2bChain=0
     self.tasks={}
     self:clearAttackBuffer()
     for i=1,#self.visTime do
@@ -3277,6 +3285,7 @@ function Player:revive()
     self.life=self.life-1
     self.fieldBeneath=0
     self.b2b=0
+    self.b2bChain=0
     self:freshBlockGhost()
 
     for i=1,h do

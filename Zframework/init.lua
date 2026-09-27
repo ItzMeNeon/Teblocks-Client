@@ -304,36 +304,42 @@ end
 function love.touchpressed(id,x,y)
     mouseShow=false
     if WAIT.state or SCN.swapping then return end
+    local vx,vy=ITP(xOy,x,y)
+    if SETTINGS and SETTINGS.isOpen and SETTINGS.touchDown and SETTINGS.touchDown(id,vx,vy) then return end
+    if CHAT and CHAT.isOpen and CHAT.touchDown and CHAT.touchDown(id,vx,vy) then return end
     if not SCN.mainTouchID then
         SCN.mainTouchID=id
         WIDGET.unFocus(true)
         love.touchmoved(id,x,y,0,0)
     end
-    x,y=ITP(xOy,x,y)
-    lastX,lastY=x,y
-    if SCN.touchDown then SCN.touchDown(x,y,id) end
-    WIDGET.cursorMove(x,y)
-    WIDGET.press(x,y,1)
+    lastX,lastY=vx,vy
+    if SCN.touchDown then SCN.touchDown(vx,vy,id) end
+    WIDGET.cursorMove(vx,vy)
+    WIDGET.press(vx,vy,1)
 end
 function love.touchmoved(id,x,y,dx,dy)
     if WAIT.state or SCN.swapping then return end
-    x,y=ITP(xOy,x,y)
-    if SCN.touchMove then SCN.touchMove(x,y,dx/SCR.k,dy/SCR.k,id) end
-    WIDGET.drag(x,y,dx/SCR.k,dy/SCR.k)
+    local vx,vy=ITP(xOy,x,y)
+    if SETTINGS and SETTINGS.isOpen and SETTINGS.touchMove and SETTINGS.touchMove(id,vx,vy,dx/SCR.k,dy/SCR.k) then return end
+    if CHAT and CHAT.isOpen and CHAT.touchMove and CHAT.touchMove(id,vx,vy,dx/SCR.k,dy/SCR.k) then return end
+    if SCN.touchMove then SCN.touchMove(vx,vy,dx/SCR.k,dy/SCR.k,id) end
+    WIDGET.drag(vx,vy,dx/SCR.k,dy/SCR.k)
 end
 function love.touchreleased(id,x,y)
     if WAIT.state or SCN.swapping then return end
-    x,y=ITP(xOy,x,y)
+    local vx,vy=ITP(xOy,x,y)
+    if SETTINGS and SETTINGS.isOpen and SETTINGS.touchUp and SETTINGS.touchUp(id,vx,vy) then return end
+    if CHAT and CHAT.isOpen and CHAT.touchUp and CHAT.touchUp(id,vx,vy) then return end
     if id==SCN.mainTouchID then
-        WIDGET.release(x,y,1)
-        WIDGET.cursorMove(x,y)
+        WIDGET.release(vx,vy,1)
+        WIDGET.cursorMove(vx,vy)
         WIDGET.unFocus()
         SCN.mainTouchID=false
     end
-    if SCN.touchUp then SCN.touchUp(x,y,id) end
-    if (x-lastX)^2+(y-lastY)^2<62 then
-        if SCN.touchClick then SCN.touchClick(x,y) end
-        if showClickFX then SYSFX.newTap(3,x,y) end
+    if SCN.touchUp then SCN.touchUp(vx,vy,id) end
+    if (vx-lastX)^2+(vy-lastY)^2<62 then
+        if SCN.touchClick then SCN.touchClick(vx,vy) end
+        if showClickFX then SYSFX.newTap(3,vx,vy) end
     end
 end
 -- function love.mousepressed(x,y,k) love.touchpressed(1,x,y) end
