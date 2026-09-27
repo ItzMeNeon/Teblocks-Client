@@ -2588,32 +2588,49 @@ local function _updateMisc(P,dt)
         end
     end
 
-    -- Move camera (when 3-1 lines close to top out, board smoothly slides down like 4 lines)
-    if P.gameEnv.highCam or SETTING.highCam ~= false then
-        if not P.alive then
-            y = 0
-        else
-            local topOut = P.gameEnv.fieldH or 20
-            local stackHeight = #P.field + (P.fieldBeneath or 0) / 30
-            local linesClose = topOut - stackHeight
-
-            local slideLines = 0
-            if linesClose <= 3.5 then
-                -- 3-1 lines close to top out (row 17, 18, 19, 20):
-                -- Progressively slide down 4 lines to reveal beyond ceiling
-                local progress = math.min(math.max((3.5 - linesClose) / 2.5, 0), 1)
-                local baseSlide = progress * 4
-                -- If stack or active piece exceeds topOut, slide down further to show pieces
-                local overflow = math.max(stackHeight - topOut, 0)
-                local pieceOverflow = (P.cur and P.curY and P.curY > topOut) and (P.curY - topOut) or 0
-                slideLines = math.max(baseSlide + overflow, pieceOverflow)
+    -- Move camera (slide down 4 lines when 3-1 lines close to top out, applied to ALL game modes)
+    if not P.alive then
+        y = 0
+    else
+        local topOut = P.gameEnv.fieldH or 20
+        local maxRow = 0
+        local F = P.field
+        if F then
+            for r = #F, 1, -1 do
+                local row = F[r]
+                if row then
+                    for c = 1, 10 do
+                        if row[c] and row[c] > 0 then
+                            maxRow = r
+                            break
+                        end
+                    end
+                    if maxRow > 0 then break end
+                end
             end
-            y = 30 * min(slideLines, max(topOut - 5, 15))
         end
-        local f = P.fieldUp
-        if f ~= y then
-            P.fieldUp = f > y and max(approach(f, y, dt * 6) - 2, y) or min(approach(f, y, dt * 4) + 1, y)
+        local danger = maxRow + (P.fieldBeneath or 0) / 30
+        if P.control and P.cur and P.ghoY then
+            local ghostTop = P.ghoY + (P.cur.bk and #P.cur.bk or 2) - 1 + (P.fieldBeneath or 0) / 30
+            if ghostTop > danger then danger = ghostTop end
         end
+        if P.control and P.cur and P.curY and danger >= topOut - 3 then
+            local pieceTop = P.curY + (P.cur.bk and #P.cur.bk or 2) - 1 + (P.fieldBeneath or 0) / 30
+            if pieceTop > danger then danger = pieceTop end
+        end
+
+        local slideLines = 0
+        if danger >= topOut - 3 then
+            -- When 3-1 lines close to top out (rows 17-20 for 20-high board):
+            -- Slide down 4 lines, plus any extra lines if stack exceeds topOut
+            local overflow = math.max(danger - topOut, 0)
+            slideLines = 4 + overflow
+        end
+        y = 30 * math.min(slideLines, math.max(topOut - 5, 15))
+    end
+    local f = P.fieldUp
+    if f ~= y then
+        P.fieldUp = f > y and math.max(approach(f, y, dt * 6) - 2, y) or math.min(approach(f, y, dt * 6) + 1, y)
     end
 
     -- Update Score

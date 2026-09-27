@@ -211,6 +211,7 @@ function MES.new(icon, str, time)
         targetY = 75,
         rot = 0,
         yeeted = false,
+        slidingOut = false,
         vx = 0,
         vy = 0,
         rotSpeed = 0,
@@ -254,6 +255,7 @@ function MES.yeet(idx, flickVx, flickVy)
     if not m or m.yeeted then return end
     m.yeeted = true
     m.isDragged = false
+    m.slidingOut = false
     m.startTime = 0
     m.time = 0
     m.endTime = 0.8
@@ -333,13 +335,14 @@ function MES.mouseDown(rawX, rawY, k)
             if mx >= m.x and mx <= m.x + m.w and my >= m.y and my <= m.y + m.h then
                 -- Close button '✕'
                 if mx >= m.x + m.w - 32 and mx <= m.x + m.w - 8 and my >= m.y + 8 and my <= m.y + 32 then
-                    MES.yeet(i)
+                    m.slidingOut = true
                     return true
                 end
 
                 dragToast = i
                 activeDragTouchId = nil
                 m.isDragged = true
+                m.slidingOut = false
                 pressX, pressY = mx, my
                 dragOffsetX = mx - m.x
                 dragOffsetY = my - m.y
@@ -401,7 +404,7 @@ function MES.mouseUp(rawX, rawY, k)
             local dist = math.sqrt(totalDx * totalDx + totalDy * totalDy)
             local flickSpeed = math.sqrt(dragVx * dragVx + dragVy * dragVy)
 
-            if flickSpeed > 200 or dist > 15 then
+            if flickSpeed > 180 or dist > 25 then
                 local vx = dragVx
                 local vy = dragVy
                 if math.abs(vx) < 150 and math.abs(vy) < 150 then
@@ -416,7 +419,7 @@ function MES.mouseUp(rawX, rawY, k)
                 end
                 MES.yeet(idx, vx, vy)
             else
-                MES.yeet(idx)
+                m.isDragged = false
             end
             return true
         end
@@ -479,6 +482,7 @@ function MES.touchDown(id, rawX, rawY)
                 dragToast = i
                 activeDragTouchId = id
                 m.isDragged = true
+                m.slidingOut = false
                 pressX, pressY = mx, my
                 dragOffsetX = mx - m.x
                 dragOffsetY = my - m.y
@@ -581,6 +585,14 @@ function MES.update(dt)
             if m.endTime <= 0 or m.y > screenH + 400 or m.y < -400 or m.x < -600 or m.x > screenW + 600 then
                 rem(mesList, i)
             end
+        elseif m.slidingOut then
+            -- Left alone / timed out: smoothly slide out to the right (silent, zero sound)
+            local targetX = screenW + m.w + 60
+            m.x = MATH.expApproach(m.x, targetX, dt * 14)
+            m.rot = MATH.expApproach(m.rot, 0, dt * 18)
+            if m.x >= screenW + 20 then
+                rem(mesList, i)
+            end
         else
             if m.startTime > 0 then
                 m.startTime = max(0, m.startTime - dt)
@@ -588,7 +600,7 @@ function MES.update(dt)
                 -- Only decrement timer when not hovered/dragged so player can read comfortably
                 m.time = max(0, m.time - dt)
                 if m.time <= 0 then
-                    MES.yeet(i)
+                    m.slidingOut = true
                 end
             end
 

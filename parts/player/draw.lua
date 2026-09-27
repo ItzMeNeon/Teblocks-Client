@@ -914,9 +914,9 @@ function draw.norm(P,repMode)
             local fieldTop=-ENV.fieldH*30
 
             -- Draw dangerous area
-            if fieldTop-camDY<610 then
+            if camDY > 0 then
                 gc_setColor(1,0,0,.26)
-                gc_rectangle('fill',0,fieldTop,300,-10-camDY-(600-fieldTop))
+                gc_rectangle('fill',0,fieldTop,300,-10-camDY-(600+fieldTop))
             end
 
             -- Draw field
