@@ -735,7 +735,7 @@ do-- Userdata tables
     QUICKPLAY_MODES={'sprint_40l','sprint_100l','sprintLock'}-- Quick Play mode set (40 line, sprint, L)
     STAT={
         version=VERSION.code,
-        elo=1200,-- Competitive elo rating
+        elo=100,-- Competitive elo rating (Season 0 starts at 100)
         globalRank=0,-- Global rank (0 = unranked)
         run=0,game=0,time=0,frame=0,
         key=0,rotate=0,hold=0,

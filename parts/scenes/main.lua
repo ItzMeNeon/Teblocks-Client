@@ -263,6 +263,18 @@ local function getProfileMenuItems()
     return items
 end
 
+local function getRankRingColor(elo)
+    elo = tonumber(elo) or 100
+    if elo >= 1900 then return {1.0, 0.25, 0.45}      -- GM (ruby red)
+    elseif elo >= 1600 then return {0.85, 0.35, 1.0}   -- Master (purple)
+    elseif elo >= 1300 then return {0.35, 0.85, 1.0}   -- Diamond (cyan)
+    elseif elo >= 1000 then return {0.35, 1.0, 0.75}   -- Platinum (teal)
+    elseif elo >= 700 then return {1.0, 0.80, 0.25}    -- Gold
+    elseif elo >= 400 then return {0.75, 0.82, 0.90}   -- Silver
+    else return {0.85, 0.55, 0.35}                     -- Bronze
+    end
+end
+
 local function drawProfilePill(t)
     local mx, my = getMousePos()
     local isHover = (mx >= PROF_X and mx <= PROF_X + PROF_W and my >= PROF_Y and my <= PROF_Y + PROF_H)
@@ -271,22 +283,33 @@ local function drawProfilePill(t)
     local uname = isLogged and USERS.getUsername(uid) or "Guest Player"
     if not uname or #uname == 0 then uname = "Guest Player" end
 
-    -- Pill Background
+    local elo = STAT.elo or 100
+    local ringCol = getRankRingColor(elo)
+
+    -- Pill Background: Dark glassmorphic capsule
     if isHover or profMenuOpen then
-        GC.setColor(.14, .20, .42, .88)
-        GC.rectangle('fill', PROF_X, PROF_Y, PROF_W, PROF_H, 7)
-        GC.setColor(.38, .60, 1.0, .90)
+        GC.setColor(.06, .10, .24, .92)
+        GC.rectangle('fill', PROF_X, PROF_Y, PROF_W, PROF_H, 10)
+        -- Glow outline
+        GC.setColor(ringCol[1], ringCol[2], ringCol[3], .35)
+        GC.setLineWidth(3)
+        GC.rectangle('line', PROF_X - 1, PROF_Y - 1, PROF_W + 2, PROF_H + 2, 11)
+        GC.setColor(.38, .65, 1.0, .95)
         GC.setLineWidth(1.5)
-        GC.rectangle('line', PROF_X, PROF_Y, PROF_W, PROF_H, 7)
+        GC.rectangle('line', PROF_X, PROF_Y, PROF_W, PROF_H, 10)
     else
-        GC.setColor(.07, .10, .22, .65)
-        GC.rectangle('fill', PROF_X, PROF_Y, PROF_W, PROF_H, 7)
-        GC.setColor(.22, .32, .60, .55)
-        GC.setLineWidth(1)
-        GC.rectangle('line', PROF_X, PROF_Y, PROF_W, PROF_H, 7)
+        GC.setColor(.04, .06, .14, .80)
+        GC.rectangle('fill', PROF_X, PROF_Y, PROF_W, PROF_H, 10)
+        GC.setColor(.20, .32, .55, .55)
+        GC.setLineWidth(1.2)
+        GC.rectangle('line', PROF_X, PROF_Y, PROF_W, PROF_H, 10)
     end
 
-    -- Circular Avatar
+    -- Top subtle sheen
+    GC.setColor(1, 1, 1, isHover and .06 or .03)
+    GC.rectangle('fill', PROF_X + 2, PROF_Y + 2, PROF_W - 4, math.floor(PROF_H * .42), 8)
+
+    -- Circular Avatar with osu! style rank ring
     local avX, avY, avR = PROF_X + 20, PROF_Y + PROF_H * .5, 14
     local avatar = isLogged and USERS.getAvatar(uid) or USERS.getAvatar(nil)
     if avatar then
@@ -298,9 +321,15 @@ local function drawProfilePill(t)
         GC.draw(avatar, avX - avR, avY - avR, 0, s, s)
         GC.setStencilTest()
 
-        GC.setColor(.35, .65, 1.0, isHover and .9 or .6)
-        GC.setLineWidth(1.5)
+        -- Outer tier ring
+        local rCol = isLogged and ringCol or {.35, .65, 1.0}
+        GC.setColor(rCol[1], rCol[2], rCol[3], isHover and 1.0 or .75)
+        GC.setLineWidth(1.8)
         GC.circle('line', avX, avY, avR)
+        if isLogged and isHover then
+            GC.setColor(rCol[1], rCol[2], rCol[3], .35)
+            GC.circle('line', avX, avY, avR + 2)
+        end
     else
         local idx = math.floor(t * .4) % 7 + 1
         local bc  = BCL[idx]
@@ -316,7 +345,7 @@ local function drawProfilePill(t)
 
     -- Text Info
     local tx = PROF_X + 42
-    local maxTextW = PROF_W - 62
+    local maxTextW = PROF_W - 68
     setFont(13)
     local displayName = uname
     if FONT.get(13):getWidth(displayName) > maxTextW then
@@ -326,33 +355,49 @@ local function drawProfilePill(t)
         displayName = displayName .. "..."
     end
 
-    GC.setColor(.95, .98, 1, .95)
+    GC.setColor(1, 1, 1, .98)
     GC.print(displayName, tx, PROF_Y + 5)
 
-    -- Status dot (online green dot if logged in)
+    -- Status dot (pulsating neon lime dot if logged in)
     if isLogged then
         local dotX = tx + FONT.get(13):getWidth(displayName) + 6
         if dotX < PROF_X + PROF_W - 20 then
-            GC.setColor(.22, .95, .45, 1)
+            local pulse = 0.5 + 0.5 * math.sin(t * 5)
+            GC.setColor(.20, 1.0, .50, .35 * pulse)
+            GC.circle('fill', dotX, PROF_Y + 12, 5 + 2 * pulse)
+            GC.setColor(.22, .98, .45, 1)
             GC.circle('fill', dotX, PROF_Y + 12, 3)
         end
     end
 
-    -- Subtitle
+    -- Subtitle: Season 0 ELO Badge
     setFont(11)
     if isLogged then
         local rank = STAT.globalRank or 0
-        local elo = STAT.elo or 1200
-        local rankStr = rank > 0 and ("#" .. rank .. " • ") or ""
-        GC.setColor(.60, .75, .95, .8)
-        GC.print(rankStr .. elo .. " ELO", tx, PROF_Y + 22)
+        local rankStr = rank > 0 and ("#" .. rank) or "Unranked"
+
+        -- S0 Badge Pill
+        GC.setColor(1.0, .78, .20, .25)
+        GC.rectangle('fill', tx, PROF_Y + 22, 22, 13, 3)
+        GC.setColor(1.0, .85, .30, .90)
+        GC.setLineWidth(1)
+        GC.rectangle('line', tx, PROF_Y + 22, 22, 13, 3)
+        setFont(9)
+        GC.print("S0", tx + 4, PROF_Y + 23)
+
+        -- ELO & Rank text
+        setFont(11)
+        GC.setColor(ringCol[1], ringCol[2], ringCol[3], .95)
+        GC.print(elo .. " ELO", tx + 26, PROF_Y + 22)
+        GC.setColor(.60, .75, .95, .80)
+        GC.print("• " .. rankStr, tx + 26 + FONT.get(11):getWidth(elo .. " ELO ") + 4, PROF_Y + 22)
     else
         GC.setColor(COLOR.lY[1], COLOR.lY[2], COLOR.lY[3], isHover and 1 or .85)
         GC.print("Sign In / Account", tx, PROF_Y + 22)
     end
 
     -- Dropdown chevron arrow
-    GC.setColor(.6, .72, .95, isHover and 1 or .6)
+    GC.setColor(.6, .75, 1.0, isHover and 1 or .6)
     setFont(11)
     GC.mStr(profMenuOpen and "▲" or "▼", PROF_X + PROF_W - 12, PROF_Y + 13)
 end
@@ -367,43 +412,45 @@ local function drawProfileDropdown(t)
     local items = getProfileMenuItems()
 
     local itemH = 38
-    local headerH = isLogged and 46 or 36
-    local menuW = 240
+    local headerH = isLogged and 48 or 36
+    local menuW = 244
     local menuH = headerH + #items * itemH + 8
     local menuX = PROF_X + PROF_W - menuW
     local menuY = PROF_Y + PROF_H + 4
 
     -- Backdrop glass panel
-    GC.setColor(.05, .07, .16, .98 * alpha)
-    GC.rectangle('fill', menuX, menuY, menuW, menuH, 6)
-    GC.setColor(.28, .42, .85, .85 * alpha)
+    GC.setColor(.04, .06, .15, .96 * alpha)
+    GC.rectangle('fill', menuX, menuY, menuW, menuH, 8)
+    GC.setColor(.25, .45, .88, .85 * alpha)
     GC.setLineWidth(1.5)
-    GC.rectangle('line', menuX, menuY, menuW, menuH, 6)
+    GC.rectangle('line', menuX, menuY, menuW, menuH, 8)
 
     -- Header stats
-    GC.setColor(.10, .14, .32, .75 * alpha)
-    GC.rectangle('fill', menuX + 2, menuY + 2, menuW - 4, headerH, 4)
+    GC.setColor(.08, .12, .28, .85 * alpha)
+    GC.rectangle('fill', menuX + 2, menuY + 2, menuW - 4, headerH, 6)
 
     if isLogged then
         local rank = STAT.globalRank or 0
-        local elo = STAT.elo or 1200
-        local rankStr = rank > 0 and ("Global Rank #" .. rank) or "Unranked Player"
+        local elo = STAT.elo or 100
+        local rankStr = rank > 0 and ("Global Rank #" .. rank) or "Unranked Contender"
+        local rCol = getRankRingColor(elo)
+
         setFont(11)
-        GC.setColor(COLOR.lH[1], COLOR.lH[2], COLOR.lH[3], alpha * .95)
+        GC.setColor(rCol[1], rCol[2], rCol[3], alpha * .95)
         GC.print(rankStr, menuX + 12, menuY + 8)
 
-        GC.setColor(COLOR.lY[1], COLOR.lY[2], COLOR.lY[3], alpha * .95)
-        GC.print("Rating: " .. elo .. " ELO", menuX + 12, menuY + 24)
+        GC.setColor(1.0, .85, .30, alpha * .95)
+        GC.print("Season 0: " .. elo .. " ELO", menuX + 12, menuY + 25)
     else
         setFont(11)
         GC.setColor(COLOR.lY[1], COLOR.lY[2], COLOR.lY[3], alpha * .95)
         GC.print("Playing as Guest", menuX + 12, menuY + 8)
         GC.setColor(.55, .65, .85, alpha * .75)
-        GC.print("Sign in to track rank & sync skins", menuX + 12, menuY + 22)
+        GC.print("Sign in to track rank & climb Season 0", menuX + 12, menuY + 22)
     end
 
     -- Divider
-    GC.setColor(.22, .32, .65, .45 * alpha)
+    GC.setColor(.22, .35, .70, .45 * alpha)
     GC.setLineWidth(1)
     GC.line(menuX + 8, menuY + headerH, menuX + menuW - 8, menuY + headerH)
 
@@ -413,24 +460,27 @@ local function drawProfileDropdown(t)
         local isHover = (mx >= menuX + 4 and mx <= menuX + menuW - 4 and my >= iy and my < iy + itemH)
 
         if isHover then
-            GC.setColor(.18, .26, .55, .80 * alpha)
-            GC.rectangle('fill', menuX + 4, iy, menuW - 8, itemH - 2, 4)
-            GC.setColor(.45, .65, 1.0, .65 * alpha)
+            GC.setColor(.14, .22, .48, .85 * alpha)
+            GC.rectangle('fill', menuX + 4, iy, menuW - 8, itemH - 2, 5)
+            GC.setColor(.35, .65, 1.0, .75 * alpha)
             GC.setLineWidth(1)
-            GC.rectangle('line', menuX + 4, iy, menuW - 8, itemH - 2, 4)
+            GC.rectangle('line', menuX + 4, iy, menuW - 8, itemH - 2, 5)
+            -- Left accent pill
+            GC.setColor(.35, .85, 1.0, .95 * alpha)
+            GC.rectangle('fill', menuX + 5, iy + 4, 3, itemH - 10, 2)
         end
 
         local c = item.color or (isHover and {1, 1, 1} or {.85, .92, 1})
         GC.setColor(c[1], c[2], c[3], alpha * (isHover and 1 or .85))
         setFont(14)
-        GC.print(item.icon or "•", menuX + 10, iy + 8)
+        GC.print(item.icon or "•", menuX + 14, iy + 8)
 
         setFont(12)
-        GC.print(item.label, menuX + 32, iy + 4)
+        GC.print(item.label, menuX + 34, iy + 4)
 
         setFont(9)
-        GC.setColor(.55, .65, .85, alpha * .75)
-        GC.print(item.sub or "", menuX + 32, iy + 20)
+        GC.setColor(.60, .72, .92, alpha * .80)
+        GC.print(item.sub or "", menuX + 34, iy + 20)
     end
 end
 
@@ -473,6 +523,9 @@ function scene.enter()
     end
     if WS.status('game') == 'dead' then
         NET.startupConnect()
+    end
+    if NET and NET.getDailyChallenge then
+        NET.getDailyChallenge()
     end
 end
 
@@ -801,13 +854,21 @@ local function drawKeyHints()
         for i, n in ipairs(PRIM_NAV) do
             local W = L[n]
             if W and not W.hide then
-                local alpha = (1 - slideAnim) * 0.28
+                local alpha = (1 - slideAnim) * 0.45
                 if alpha > 0.02 and W.x > -BW then
                     local by = NAV0 + (i - 1) * STRIDE
                     local hint = KEY_HINTS[i] or ''
-                    GC.setColor(1, 1, 1, alpha)
-                    setFont(11)
-                    GC.print(hint, W.x + BW - 18 - #hint * 6, by + BH - 14)
+                    local hw = #hint * 6 + 10
+                    local hx = W.x + BW - hw - 10
+                    local hy = by + BH - 20
+                    GC.setColor(0, 0, 0, alpha * 0.75)
+                    GC.rectangle('fill', hx, hy, hw, 14, 3)
+                    GC.setColor(1, 1, 1, alpha * 0.35)
+                    GC.setLineWidth(1)
+                    GC.rectangle('line', hx, hy, hw, 14, 3)
+                    GC.setColor(1, 1, 1, alpha * 0.95)
+                    setFont(10)
+                    GC.print(hint, hx + 5, hy + 1)
                 end
             end
         end
@@ -817,13 +878,21 @@ local function drawKeyHints()
         for i, n in ipairs(SUB_NAV) do
             local W = L[n]
             if W and not W.hide then
-                local alpha = slideAnim * 0.28
+                local alpha = slideAnim * 0.45
                 if alpha > 0.02 and W.x < 1280 then
                     local by = NAV0 + (i - 1) * STRIDE
                     local hint = subHints[i] or ''
-                    GC.setColor(1, 1, 1, alpha)
-                    setFont(11)
-                    GC.print(hint, W.x + BW - 18 - #hint * 6, by + BH - 14)
+                    local hw = #hint * 6 + 10
+                    local hx = W.x + BW - hw - 10
+                    local hy = by + BH - 20
+                    GC.setColor(0, 0, 0, alpha * 0.75)
+                    GC.rectangle('fill', hx, hy, hw, 14, 3)
+                    GC.setColor(1, 1, 1, alpha * 0.35)
+                    GC.setLineWidth(1)
+                    GC.rectangle('line', hx, hy, hw, 14, 3)
+                    GC.setColor(1, 1, 1, alpha * 0.95)
+                    setFont(10)
+                    GC.print(hint, hx + 5, hy + 1)
                 end
             end
         end

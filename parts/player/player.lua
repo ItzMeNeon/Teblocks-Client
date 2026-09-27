@@ -10,6 +10,18 @@ local assert,ins,rem=assert,table.insert,table.remove
 local resume,yield,status=coroutine.resume,coroutine.yield,coroutine.status
 local approach=MATH.expApproach
 
+-- Varint decoder for raw-bytes streaming replay path. Mirrors DATA.decodeVarint.
+local _decodeV=function(str,p)
+    local ret=0
+    repeat
+        local b=str:byte(p)
+        if not b then return ret,p end
+        p=p+1
+        ret=ret*128+(b<128 and b or b-128)
+    until b<128
+    return ret,p
+end
+
 local SFX,BGM,VOC,VIB,SYSFX=SFX,BGM,VOC,VIB,SYSFX
 local LINE,TABLE,TEXT,TASK=LINE,TABLE,TEXT,TASK
 local PLAYERS,PLY_ALIVE,GAME=PLAYERS,PLY_ALIVE,GAME
@@ -622,6 +634,15 @@ end
 function Player:startStreaming(streamData)
     self.stream=streamData or self.stream
     self.streamProgress=1
+end
+
+-- Returns true if the player's recording stream has unprocessed data.
+-- Works for both the decoded-table (live remote) and raw-bytes (replay) formats.
+function Player:streamHasData()
+    local s=self.stream
+    if not s or not self.streamProgress then return false end
+    if type(s)=='string' then return self.streamProgress<=#s end
+    return s[self.streamProgress]~=nil
 end
 
 function Player:setPosition(x,y,size)
@@ -2932,8 +2953,98 @@ local function update_alive(P,dt)
 
     _updateMisc(P,dt)
 end
+-- Raw-bytes streaming path. P.stream is the compressed recording bytes;
+-- P.streamProgress is a byte offset. Varints are decoded on-the-fly so the
+-- entire recording never needs to be inflated into a Lua table.
+local function update_streaming_raw(P)
+    _prof.streamCalls=_prof.streamCalls+1
+    local stream=P.stream
+    local sp=P.streamProgress
+    local len=#stream
+    local frameRun=P.frameRun
+    while sp<=len do
+        local eventTime,sp2=_decodeV(stream,sp)
+        if sp2>len then P.streamProgress=sp2 return end
+        if eventTime~=0 and eventTime>frameRun then break end
+        local event,sp3=_decodeV(stream,sp2)
+        if event==0 then-- Just wait
+        elseif event<=32 then-- Press key
+            P:pressKey(event)
+        elseif event<=64 then-- Release key
+            P:releaseKey(event-32)
+        elseif event<=128 then-- Extra Event
+            local extraIdx=event-64
+            local extraDef=P.gameEnv and P.gameEnv.extraEvent and P.gameEnv.extraEvent[extraIdx]
+            if not extraDef then P.streamProgress=sp3 return end
+            local eventName=extraDef[1]
+            local eventParamCount=extraDef[2]
+            local rawSourceSid; rawSourceSid,sp3=_decodeV(stream,sp3)
+            local p1,p2,p3,p4,p5
+            if eventParamCount>=1 then p1,sp3=_decodeV(stream,sp3) end
+            if eventParamCount>=2 then p2,sp3=_decodeV(stream,sp3) end
+            if eventParamCount>=3 then p3,sp3=_decodeV(stream,sp3) end
+            if eventParamCount>=4 then p4,sp3=_decodeV(stream,sp3) end
+            if eventParamCount>=5 then p5,sp3=_decodeV(stream,sp3) end
+            if P.type=='remote' or GAME.replaying or P.sid==rawSourceSid then
+                _prof.streamExtraEvents=_prof.streamExtraEvents+1
+                local SRC=P
+                if eventName=='attack' then
+                    local target=nil
+                    if #PLAYERS==2 then
+                        for _,pp in next,PLAYERS do
+                            if pp~=P then target=pp break end
+                        end
+                    else
+                        for _,pp in next,PLAYERS do
+                            if pp.sid==p1 then target=pp break end
+                        end
+                        if not target then
+                            for _,pp in next,PLAYERS do
+                                if pp~=P then target=pp break end
+                            end
+                        end
+                    end
+                    if SRC and target and target.gameEnv and
+                       target.gameEnv.extraEventHandler and
+                       target.gameEnv.extraEventHandler['attack'] then
+                        if SRC.createBeam then SRC:createBeam(target,p2) end
+                        target.gameEnv.extraEventHandler['attack'](target,SRC,
+                            target.sid,p2,p3,p4,p5)
+                    end
+                else
+                    local subject=P
+                    if SRC and subject and subject.gameEnv and
+                       subject.gameEnv.extraEventHandler and
+                       subject.gameEnv.extraEventHandler[eventName] then
+                        if eventParamCount==0 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC)
+                        elseif eventParamCount==1 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1)
+                        elseif eventParamCount==2 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1,p2)
+                        elseif eventParamCount==3 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1,p2,p3)
+                        elseif eventParamCount==4 then
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1,p2,p3,p4)
+                        else
+                            subject.gameEnv.extraEventHandler[eventName](subject,SRC,p1,p2,p3,p4,p5)
+                        end
+                    end
+                end
+            end
+        end-- event type
+        sp=sp3
+        frameRun=P.frameRun
+    end
+    P.streamProgress=sp
+end
 local function update_streaming(P)
     _prof.streamCalls=_prof.streamCalls+1
+    -- Dispatch: raw-bytes path for replay; decoded-table path for live streams.
+    if type(P.stream)=='string' then
+        update_streaming_raw(P)
+        return
+    end
     local eventTime=P.stream[P.streamProgress]
     while eventTime and (P.frameRun==eventTime or eventTime==0 or eventTime < P.frameRun) do
         local event=P.stream[P.streamProgress+1]
@@ -3110,11 +3221,11 @@ function Player:update(dt)
             -- already topped out in the live match. Stop simulating them here so
             -- the board doesn't keep spawning/clipping pieces above the spawn,
             -- then resolve the match (loser tops out; last player alive wins).
-            if GAME.replaying and GAME.net and self.streamProgress and not self.stream[self.streamProgress] and self.alive then
+            if GAME.replaying and GAME.net and self.streamProgress and not self:streamHasData() and self.alive then
                 break
             end
         end
-        if GAME.replaying and GAME.net and self.streamProgress and not self.stream[self.streamProgress] and self.alive then
+        if GAME.replaying and GAME.net and self.streamProgress and not self:streamHasData() and self.alive then
             local othersAlive=false
             for _,p in next,PLY_ALIVE do
                 if p~=self then othersAlive=true break end
@@ -3130,7 +3241,7 @@ function Player:update(dt)
                     local t=0
                     while t<2.6 do
                         local dt=coroutine.yield()
-                        if not (GAME.replaying and not self.stream[self.streamProgress]) then
+                        if not (GAME.replaying and not self:streamHasData()) then
                             return
                         end
                         t=t+(dt or 0.016)

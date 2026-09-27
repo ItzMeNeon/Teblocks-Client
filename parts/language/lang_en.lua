@@ -468,7 +468,7 @@ C. Gamepad
             more="More Modes",
             back="Back",
             qplay="Quick Play",
-            qp_40l="40 Line",
+            qp_40l="Daily Challenge",
             qp_sprint="Sprint",
             qp_lock="L",
             online="Multiplayer",
@@ -921,7 +921,7 @@ C. Gamepad
     modes={
         ['sprint_10l']=          {"Sprint",            "10L",            "Clear 10 lines!"},
         ['sprint_20l']=          {"Sprint",            "20L",            "Clear 20 lines!"},
-        ['sprint_40l']=          {"Sprint",            "40L",            "Clear 40 lines!"},
+        ['sprint_40l']=          {"Daily",             "CHALLENGE",      "Daily 40L sprint with server twists & global leaderboards!"},
         ['sprint_100l']=         {"Sprint",            "100L",           "Clear 100 lines!"},
         ['sprint_400l']=         {"Sprint",            "400L",           "Clear 400 lines!"},
         ['sprint_1000l']=        {"Sprint",            "1000L",          "Clear 1,000 lines!"},

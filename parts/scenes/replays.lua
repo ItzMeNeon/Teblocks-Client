@@ -6,12 +6,8 @@ local counts={all=0,ranked=0,casual=0,single=0}
 
 local function _formatDuration(d)
     if not d or d==0 then return nil end
-    local sec=d
-    if d>120 then
-        sec=math.floor(d/60)
-    else
-        sec=math.floor(d)
-    end
+    -- duration is stored in game frames (60fps); divide by 60 to get seconds
+    local sec=math.floor(d/60)
     local mm=math.floor(sec/60)
     local ss=sec%60
     return ("%02d:%02d"):format(mm,ss)
@@ -62,6 +58,18 @@ local listBox=WIDGET.newListBox{name='list',x=50,y=75,w=1200,h=545,lineH=68,draw
         GC.setColor(.4,.95,1)
         GC.print("👥 CASUAL ROOM",badgeX+10,13)
         badgeX=badgeX+155
+    elseif rep.mode=='sprint_40l' then
+        local label="📅 DAILY CHALLENGE"
+        local strWid=165
+        GC.setColor(.2,.8,.4,.25)
+        GC.rectangle('fill',badgeX,10,strWid,24,6)
+        GC.setLineWidth(1.5)
+        GC.setColor(.3,1,.5,.8)
+        GC.rectangle('line',badgeX,10,strWid,24,6)
+        setFont(14)
+        GC.setColor(.4,1,.6)
+        GC.print(label,badgeX+10,13)
+        badgeX=badgeX+strWid+10
     else
         local modeName=text.modes[rep.mode]
         local label=modeName and (modeName[1].." "..(modeName[2] or "")) or (rep.mode or "SOLO")
@@ -106,6 +114,9 @@ local listBox=WIDGET.newListBox{name='list',x=50,y=75,w=1200,h=545,lineH=68,draw
         else
             GC.setColor(.95,.95,1)
             local pName=(rep.player and rep.player~="Local Player") and rep.player or "Solo Player"
+            if rep.mode=='sprint_40l' and rep.private and rep.private.title then
+                pName = pName .. " · " .. rep.private.title
+            end
             GC.print(pName,badgeX+10,10)
         end
     else
@@ -240,7 +251,9 @@ local function _playRep(rep)
             }
             NET.startRankedReplay(fullRep,oppRep,USER.uid,fullRep.opponentId or 'opp')
         else
-            MES.new('error',"Casual replay missing opponent stream")
+            -- Opponent's stream is missing; play back only the local side.
+            MES.new('warn',"Opponent stream unavailable — playing solo side only")
+            NET.startSoloReplay(fullRep)
         end
     elseif rep.mode=='netBattle' then
         _playRankedRep(rep)
@@ -319,7 +332,7 @@ local function _buildDisplayList()
                 setting=myRep.setting,
                 result=myRep.result,
                 myScore=myRep.myScore,
-                oppScore=oppRep.oppScore,
+                oppScore=myRep.oppScore,
                 duration=myRep.duration or oppRep.duration,
                 available=myRep.available and oppRep.available,
                 tasUsed=myRep.tasUsed or oppRep.tasUsed,

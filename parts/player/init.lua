@@ -363,7 +363,15 @@ local function _applyGameEnv(P)-- Finish gameEnv processing
     local seqCalled=false
     local initSZOcount=0
     local bagLineCounter=0
+    P.seqHistory={}
+    P.seqHistoryIndex=1
     function P:newNext()
+        if self.seqHistory and self.seqHistory[self.seqHistoryIndex] then
+            local cached=self.seqHistory[self.seqHistoryIndex]
+            self.seqHistoryIndex=self.seqHistoryIndex+1
+            P:getNext(cached.id,cached.bagLine)
+            return
+        end
         local status,piece
         if seqCalled then
             status,piece=coroutine.resume(seqGen,P.field,P.stat)
@@ -382,8 +390,13 @@ local function _applyGameEnv(P)-- Finish gameEnv processing
                     initSZOcount=5
                 end
             end
-            P:getNext(piece,bagLineCounter)
+            local blc=bagLineCounter
             bagLineCounter=0
+            if self.seqHistory then
+                self.seqHistory[self.seqHistoryIndex]={id=piece,bagLine=blc}
+                self.seqHistoryIndex=self.seqHistoryIndex+1
+            end
+            P:getNext(piece,blc)
         else
             if ENV.bagLine then
                 bagLineCounter=bagLineCounter+1

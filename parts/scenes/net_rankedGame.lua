@@ -54,13 +54,13 @@ local scoreAnim={
 }
 
 local function _getRankTier(elo)
-    elo = elo or 1200
-    if elo >= 2000 then return {0.95, 0.40, 0.95}, "GM"
-    elseif elo >= 1800 then return {0.70, 0.50, 0.98}, "MASTER"
-    elseif elo >= 1600 then return {0.35, 0.85, 0.98}, "DIAMOND"
-    elseif elo >= 1400 then return {0.35, 0.95, 0.55}, "PLAT"
-    elseif elo >= 1200 then return {0.98, 0.85, 0.30}, "GOLD"
-    elseif elo >= 1000 then return {0.80, 0.85, 0.95}, "SILVER"
+    elo = elo or 100
+    if elo >= 1900 then return {1.0, 0.25, 0.45}, "GM"
+    elseif elo >= 1600 then return {0.85, 0.35, 1.0}, "MASTER"
+    elseif elo >= 1300 then return {0.35, 0.85, 1.0}, "DIAMOND"
+    elseif elo >= 1000 then return {0.35, 1.0, 0.75}, "PLAT"
+    elseif elo >= 700 then return {1.0, 0.80, 0.25}, "GOLD"
+    elseif elo >= 400 then return {0.75, 0.82, 0.90}, "SILVER"
     else return {0.85, 0.55, 0.35}, "BRONZE"
     end
 end
@@ -586,7 +586,7 @@ function scene.draw()
         if P and P.fieldY and P.centerX then
             local isYou = P.uid == USER.uid
             local label = isYou and "YOU" or (P.username or NET.matchFoundOppName or "OPPONENT")
-            local eloVal = isYou and (STAT.elo or 1200) or (NET.matchFoundOppElo or 1200)
+            local eloVal = isYou and (STAT.elo or 100) or (NET.matchFoundOppElo or 100)
             local tierColor, tierName = _getRankTier(eloVal)
             local wins = isYou and myWins or oppWins
 

@@ -77,8 +77,8 @@ function scene.draw()
     GC.setLineWidth(2)
     GC.rectangle('line',0,0,560,160,5)
     GC.rectangle('line',0,240,560,160,5)
-    for x=1,6 do
-        x=80*x
+    for i=1,6 do
+        local x=80*i
         GC.line(x,0,x,160)
         GC.line(x,240,x,400)
     end

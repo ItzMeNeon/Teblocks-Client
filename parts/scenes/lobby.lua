@@ -293,13 +293,13 @@ function scene.draw()
     gc_setLineWidth(1)
     gc_rectangle('line', c2X + 24, eloBoxY, cW - 48, 76, 8)
 
-    local elo = (USER and USER.uid and STAT.elo) or 1200
+    local elo = (USER and USER.uid and STAT.elo) or 100
     local rank = (USER and USER.uid and STAT.globalRank) or 0
     local rankStr = rank > 0 and ("#" .. rank) or "Unranked"
 
     setFont(11)
     gc_setColor(.85, .75, .50, .85)
-    gc.print("CURRENT RATING", c2X + 42, eloBoxY + 14)
+    gc.print("SEASON 0 RATING", c2X + 42, eloBoxY + 14)
     gc.print("LEADERBOARD RANK", c2X + 250, eloBoxY + 14)
 
     setFont(26)

@@ -27,19 +27,27 @@ local function _name(uid)
 end
 
 local function getTierInfo(elo)
-    elo = tonumber(elo) or 1200
-    if elo >= 2200 then
-        return "Master Division", { .85, .35, 1.0 }, "Tier I"
-    elseif elo >= 1900 then
-        return "Diamond Division", { .35, .85, 1.0 }, "Tier II"
+    elo = tonumber(elo) or 100
+    if elo >= 1900 then
+        return "Grandmaster Division", { 1.0, .25, .45 }, "GM"
     elseif elo >= 1600 then
-        return "Platinum Division", { .35, 1.0, .75 }, "Tier III"
+        local div = math.min(3, math.floor((elo - 1600) / 100) + 1)
+        return "Master Division", { .85, .35, 1.0 }, "Tier " .. div
     elseif elo >= 1300 then
-        return "Gold Division", { 1.0, .80, .25 }, "Tier IV"
+        local div = math.min(3, math.floor((elo - 1300) / 100) + 1)
+        return "Diamond Division", { .35, .85, 1.0 }, "Tier " .. div
     elseif elo >= 1000 then
-        return "Silver Division", { .85, .90, 1.0 }, "Tier V"
+        local div = math.min(3, math.floor((elo - 1000) / 100) + 1)
+        return "Platinum Division", { .35, 1.0, .75 }, "Tier " .. div
+    elseif elo >= 700 then
+        local div = math.min(3, math.floor((elo - 700) / 100) + 1)
+        return "Gold Division", { 1.0, .80, .25 }, "Tier " .. div
+    elseif elo >= 400 then
+        local div = math.min(3, math.floor((elo - 400) / 100) + 1)
+        return "Silver Division", { .75, .82, .90 }, "Tier " .. div
     else
-        return "Bronze Division", { .85, .55, .35 }, "Tier VI"
+        local div = math.max(1, math.min(3, math.floor((elo - 100) / 100) + 1))
+        return "Bronze Division", { .85, .55, .35 }, "Tier " .. div
     end
 end
 
@@ -213,8 +221,8 @@ function scene.draw()
     local leftX = 640 - cardW - gap / 2
     local rightX = 640 + gap / 2
 
-    local myElo = R.myNew or (STAT.elo or 1200)
-    local oppElo = R.oppNew or 1200
+    local myElo = R.myNew or (STAT.elo or 100)
+    local oppElo = R.oppNew or 100
     local myTierName, myTierCol, myTierSub = getTierInfo(myElo)
     local oppTierName, oppTierCol, oppTierSub = getTierInfo(oppElo)
 
@@ -292,8 +300,8 @@ function scene.draw()
         gc_printf(matchStat, x + 20, cardY + 280, cardW - 40, 'center')
     end
 
-    _drawCard(leftX, "You", R.myOld or 1200, R.myNew or 1200, R.myDelta or 0, R.myRank or 0, true, myScore, myTierName, myTierCol, myTierSub)
-    _drawCard(rightX, _name(R.oppId), R.oppOld or 1200, R.oppNew or 1200, R.oppDelta or 0, R.oppRank or 0, false, oppScore, oppTierName, oppTierCol, oppTierSub)
+    _drawCard(leftX, "You", R.myOld or 100, R.myNew or 100, R.myDelta or 0, R.myRank or 0, true, myScore, myTierName, myTierCol, myTierSub)
+    _drawCard(rightX, _name(R.oppId), R.oppOld or 100, R.oppNew or 100, R.oppDelta or 0, R.oppRank or 0, false, oppScore, oppTierName, oppTierCol, oppTierSub)
 
     -- Bottom Call-to-Action Bar (y=600..664)
     local mx, my = love.mouse.getPosition()

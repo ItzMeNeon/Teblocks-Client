@@ -16,9 +16,9 @@ end
 
 scene.widgetList={
     WIDGET.newKey{name='setting',   x=1200,y=160,w=90, h=90,code=goScene'setting_game',font=60,fText=CHAR.icon.settings},
-    WIDGET.newButton{name='galaxim',x=640, y=260,w=350,h=120,font=40,color='D',code=goScene'net_galaxim'},
-    WIDGET.newButton{name='rooms',  x=640, y=460,w=350,h=120,font=40,code=goScene'net_rooms'},
-    WIDGET.newButton{name='logout', x=880, y=40,w=180, h=60,color='dR',
+    WIDGET.newButton{name='galaxim',x=640, y=260,w=350,h=120,font=40,color='lV',code=goScene'net_galaxim'},
+    WIDGET.newButton{name='rooms',  x=640, y=460,w=350,h=120,font=40,color='lC',code=goScene'net_rooms'},
+    WIDGET.newButton{name='logout', x=880, y=40,w=180, h=60,color='lR',
         code=function()
             if tryBack() then
                 print('logout')
@@ -29,7 +29,7 @@ scene.widgetList={
                 SCN.back()
             end
         end},
-    WIDGET.newButton{name='back',  x=1140,y=640,w=170,h=80,sound='back',font=60,fText=CHAR.icon.back,code=backScene},
+    WIDGET.newButton{name='back',  x=1140,y=640,w=170,h=80,color='lB',sound='back',font=60,fText=CHAR.icon.back,code=backScene},
 }
 
 return scene

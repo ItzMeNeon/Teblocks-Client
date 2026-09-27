@@ -999,19 +999,46 @@ end
 -- count). Layout per event: [frameTime, eventID, ...]; key events are 2
 -- entries, the 'attack' extra event is 8 (frameTime + eventID + sourceSid +
 -- 5 attack params).
-local function _replayStreamLength(list)
-    if not list then return 0 end
+local function _replayStreamLength(data)
+    if not data then return 0 end
+    -- Raw-bytes path: scan varints to find the last event timestamp.
+    if type(data)=='string' then
+        local len=#data
+        if len==0 then return 0 end
+        local decV=DATA.decodeVarint
+        local p=1; local lastTime=0
+        while p<=len do
+            local t,p2=decV(data,p)
+            if p2>len then break end
+            local ev,p3=decV(data,p2)
+            lastTime=t
+            if ev<=64 then
+                p=p3
+            elseif ev<=128 then
+                -- skip sourceSid + params (attack=5, garbageRise=3, default 5)
+                local nParams=(ev==65 and 5) or (ev==66 and 3) or 5
+                local sp=p3
+                for _=1,1+nParams do
+                    local _2,sp2=decV(data,sp)
+                    sp=sp2
+                    if sp>len then break end
+                end
+                p=sp
+            else
+                p=p3
+            end
+        end
+        return lastTime
+    end
+    -- Decoded-table path (legacy / live remote player streams).
     local i=1; local last=0
-    while list[i]~=nil do
-        last=list[i]
-        local ev=list[i+1]
+    while data[i]~=nil do
+        last=data[i]
+        local ev=data[i+1]
         if ev==nil then break end
         if ev<=64 then
             i=i+2
         elseif ev<=128 then
-            -- Extra event: eventID is ev-64.
-            -- attack is event 1 with 5 params (1 time + 1 ev + 1 sourceSid + 5 params = 8 entries)
-            -- garbageRise is event 2 with 3 params (6 entries)
             local paramCount=(ev==65 and 5) or (ev==66 and 3) or 5
             i=i+2+1+paramCount
         else
@@ -1022,7 +1049,7 @@ local function _replayStreamLength(list)
 end
 
 -- Smooth keyframe-based seek: restores nearest snapshot <= frame, then
--- steps forward remaining < 60 frames in microtime (<0.5ms). Caches all
+-- steps forward remaining < 300 frames in microtime (<1ms). Caches all
 -- newly simulated keyframes along the way for real-time scrubbing.
 function NET.seekReplay(frame)
     if not GAME.replaying or not NET._replayKeyframes or #PLAYERS<1 then return end
@@ -1031,10 +1058,10 @@ function NET.seekReplay(frame)
 
     local SNAPSHOT=require('parts.player.snapshot')
 
-    -- Find nearest cached keyframe <= frame
-    local kTarget=math.floor(frame/60)*60
+    -- Find nearest cached keyframe <= frame (keyframes are every 300 frames / 5 sec)
+    local kTarget=math.floor(frame/300)*300
     local bestK=0
-    for f=kTarget,0,-60 do
+    for f=kTarget,0,-300 do
         if NET._replayKeyframes[f] then
             bestK=f
             break
@@ -1063,7 +1090,10 @@ function NET.seekReplay(frame)
             local finished=true
             for p=1,#PLAYERS do
                 local P=PLAYERS[p]
-                if P.alive and P.stream and P.stream[P.streamProgress] then
+                -- Check all players with streams, regardless of alive status:
+                -- a dead player still needs its stream exhausted so the seek
+                -- lands at a consistent state.
+                if P:streamHasData() then
                     finished=false
                 end
             end
@@ -1072,7 +1102,7 @@ function NET.seekReplay(frame)
             for p=1,#PLAYERS do PLAYERS[p]:update(1/60) end
             curF=curF+1
 
-            if curF%60==0 and not NET._replayKeyframes[curF] then
+            if curF%300==0 and not NET._replayKeyframes[curF] then
                 local kSnap={players={}}
                 for p=1,#PLAYERS do
                     kSnap.players[p]=SNAPSHOT.snapshot(PLAYERS[p])
@@ -1083,7 +1113,14 @@ function NET.seekReplay(frame)
         GAME.seeking=false
     end
 
-    NET._replayCur=frame
+    -- Update _replayCur from actual player frameRun values so it reflects
+    -- where the replay truly landed (the loop may have stopped early if the
+    -- recording was exhausted before reaching `frame`).
+    local maxFR=0
+    for p=1,#PLAYERS do
+        if PLAYERS[p].frameRun>maxFR then maxFR=PLAYERS[p].frameRun end
+    end
+    NET._replayCur=maxFR>0 and maxFR or frame
     NET._replayEndPos=nil
     if NET._replaySettled then
         NET._replaySettled=false
@@ -1108,13 +1145,11 @@ function NET._initReplayStreams()
     local myUid=tostring(NET._replayReps.myUid or "")
     local oppUid=tostring(NET._replayReps.oppUid or "")
 
-    local myList={}
-    if type(myRep.data)=='string' then
-        DATA.pumpRecording(myRep.data or "",myList)
-    elseif type(myRep.data)=='table' then
-        myList=TABLE.copy(myRep.data)
-    end
-    GAME.rep=myList
+    -- Pass raw bytes directly — no pumpRecording. update_streaming_raw decodes
+    -- varints on-the-fly so the entire recording never has to be inflated into
+    -- a Lua table (eliminates the main source of the RAM spike for long matches).
+    local myRaw=type(myRep.data)=='string' and myRep.data or ""
+    GAME.rep={}  -- GAME.rep is not used during replay; keep it empty
     GAME.replaying=true
     GAME.replaySetup=false
     GAME.recording=false
@@ -1123,7 +1158,7 @@ function NET._initReplayStreams()
 
     if #PLAYERS==1 then
         local P=PLAYERS[1]
-        P:startStreaming(myList)
+        P:startStreaming(myRaw)
         if myRep.player and #myRep.player>0 then
             P.username=myRep.player
         end
@@ -1131,7 +1166,7 @@ function NET._initReplayStreams()
         local size=0.85
         P:setPosition(640-300*size, 664-600*size-36, size)
 
-        NET._replayTotal=_replayStreamLength(myList)
+        NET._replayTotal=_replayStreamLength(myRaw)
         NET._replayKeyframes={
             [0]={
                 players={
@@ -1140,14 +1175,7 @@ function NET._initReplayStreams()
             }
         }
     else
-        local oppList={}
-        if oppRep then
-            if type(oppRep.data)=='string' then
-                DATA.pumpRecording(oppRep.data or "",oppList)
-            elseif type(oppRep.data)=='table' then
-                oppList=TABLE.copy(oppRep.data)
-            end
-        end
+        local oppRaw=oppRep and (type(oppRep.data)=='string' and oppRep.data or "") or ""
 
         -- Match players by UID so streams never get inverted
         local pMy=PLAYERS[1]
@@ -1165,20 +1193,20 @@ function NET._initReplayStreams()
         end
 
         if pMy then
-            pMy:startStreaming(myList)
+            pMy:startStreaming(myRaw)
             if myRep.player and #myRep.player>0 then
                 pMy.username=myRep.player
             end
             pMy.sound=true
         end
         if pOpp then
-            pOpp:startStreaming(oppList)
+            pOpp:startStreaming(oppRaw)
             if oppRep and oppRep.player and #oppRep.player>0 then
                 pOpp.username=oppRep.player
             end
         end
 
-        NET._replayTotal=math.max(_replayStreamLength(myList),_replayStreamLength(oppList))
+        NET._replayTotal=math.max(_replayStreamLength(myRaw),_replayStreamLength(oppRaw))
         NET._replayKeyframes={
             [0]={
                 players={
@@ -1242,16 +1270,12 @@ function NET.startSoloReplay(fullRep)
         GAME.mod[m[1]+1]=m[2]
     end
 
-    local myList={}
-    if type(fullRep.data)=='string' then
-        DATA.pumpRecording(fullRep.data,myList)
-    elseif type(fullRep.data)=='table' then
-        myList=TABLE.copy(fullRep.data)
-    end
-    GAME.rep=myList
+    -- Do not pre-decode: _initReplayStreams will stream raw bytes directly.
+    local rawBytes=type(fullRep.data)=='string' and fullRep.data or ""
+    GAME.rep={}  -- not used during replay
 
     NET._replayReps={myRep=fullRep,myUid=USER.uid}
-    NET._replayTotal=_replayStreamLength(myList)
+    NET._replayTotal=_replayStreamLength(rawBytes)
     NET._replayCur=0
     NET._replayFF=false
     NET._replayFFTarget=0
@@ -1790,7 +1814,7 @@ function NET.wsCallBack.match_found(body)
     NET.matchFoundMatchId=body.data and body.data.matchId
     NET.matchFoundOppId=oppId
     NET.matchFoundOppName=oppName
-    NET.matchFoundOppElo=body.data and body.data.opponentRating or 1200
+    NET.matchFoundOppElo=body.data and body.data.opponentRating or 100
     NET.matchFoundCountdown=10.0
     NET.matchFoundPending=true
     NET.matchFoundTime=love.timer.getTime()
@@ -1839,7 +1863,7 @@ function NET.wsCallBack.match_finish_ranked(body)
         local d=body.data
         local matchId=type(d.matchId)=='string' and d.matchId or false
         local myDelta=type(d.ratingChange)=='number' and d.ratingChange or 0
-        local myNew=type(d.ratingAfter)=='number' and d.ratingAfter or (STAT.elo or 1200)
+        local myNew=type(d.ratingAfter)=='number' and d.ratingAfter or (STAT.elo or 100)
         local myOld=myNew-myDelta
         if type(d.globalRank)=='number' then STAT.globalRank=d.globalRank end
         STAT.elo=myNew
@@ -2208,6 +2232,127 @@ function NET.ws_update()
 end
 
 --------------------------<OLD ONLINE API>
+local DAILY_TWIST_POOL = {
+    { title="Classic 7-Bag Sprint", desc="Pure speed! Standard 7 tetrominoes with no gimmicks.", seqData={1,2,3,4,5,6,7}, sequence="bag" },
+    { title="Pentamino Infusion: F & I", desc="Standard 7 tetrominoes infused with rare F & I pentaminoes!", seqData={1,2,3,4,5,6,7,8,9}, sequence="bag" },
+    { title="I-Piece Drought", desc="Line pieces are scarce! Manage your stack with half frequency.", seqData={1,1,2,2,3,3,4,4,5,5,6,6,7}, sequence="bag" },
+    { title="Micro Mino Mix", desc="Tetrominoes mixed with 1-2-3 minoes! Fill odd gaps and combo.", seqData={1,2,3,4,5,6,7,26,27,28,29}, sequence="bag" },
+    { title="Double O & Line Surge", desc="Extra square and line pieces in every bag! Build tall and quad fast.", seqData={1,2,3,4,5,6,6,7,7}, sequence="bag" },
+    { title="Pentamino Mayhem", desc="Infused with heavy pentamino pieces (P, Q, T, J, L, N).", seqData={1,2,3,4,5,6,7,10,11,12,13,14,15}, sequence="bag" },
+    { title="Historical Pool Randomizer", desc="Standard 7 pieces, drawn using historical pool randomizer.", seqData={1,2,3,4,5,6,7}, sequence="hisPool" },
+    { title="T-Piece Surge", desc="Double T-pieces in every cycle! Go for fast T-Spins.", seqData={1,2,3,4,5,5,6,7}, sequence="bag" },
+    { title="Smooth Bag (bagES)", desc="Uses bagES randomizer to filter harsh opening sequences.", seqData={1,2,3,4,5,6,7}, sequence="bagES" },
+    { title="Heavy Pentamino Rush", desc="Full Pentamino challenge! 18 exotic 5-block shapes.", seqData={8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25}, sequence="bag" },
+}
+
+function NET.generateOfflineDailyChallenge(date)
+    date = date or os.date("!%Y-%m-%d")
+    local h = 0
+    for i = 1, #date do
+        h = (h * 31 + date:byte(i)) % 2147483647
+    end
+    local vIdx = (h % #DAILY_TWIST_POOL) + 1
+    local v = DAILY_TWIST_POOL[vIdx]
+    local seq = {}
+    for i = 1, #v.seqData do seq[i] = v.seqData[i] end
+    return {
+        date = date,
+        seed = h == 0 and 1046101471 or h,
+        seqData = seq,
+        sequence = v.sequence,
+        title = v.title,
+        description = v.desc,
+        targetLines = 40,
+    }
+end
+
+function NET.getDailyChallenge(targetDate, cb)
+    if type(targetDate) == 'function' then
+        cb = targetDate
+        targetDate = nil
+    end
+    TASK.new(function()
+        local headers = {}
+        if USER and USER.aToken then
+            headers['x-access-token'] = USER.aToken
+        end
+        local path = '/api/daily'
+        if targetDate then
+            path = path .. '?date=' .. targetDate
+        end
+        local res = getMsg({
+            pool = 'daily',
+            url = AUTHHOST,
+            path = path,
+            headers = headers,
+            silentError = true,
+        }, 5)
+
+        if res and res.code and math.floor(res.code/100) == 2 and res.data and res.data.challenge then
+            if not targetDate or targetDate == os.date("!%Y-%m-%d") then
+                NET.dailyChallenge = res.data.challenge
+                NET.dailyUserScore = res.userScore
+            end
+            if cb then cb(true, res.data.challenge, res.userScore) end
+            return
+        end
+
+        local date = targetDate or os.date("!%Y-%m-%d")
+        local fallback = NET.generateOfflineDailyChallenge(date)
+        if not targetDate or targetDate == os.date("!%Y-%m-%d") then
+            NET.dailyChallenge = fallback
+        end
+        if cb then cb(false, fallback) end
+    end)
+end
+
+function NET.submitDailyScore(date, timeMs, pieceCount, cb)
+    if not (USER and USER.aToken) then return end
+    TASK.new(function()
+        local res = getMsg({
+            pool = 'dailyScore',
+            url = AUTHHOST,
+            path = '/api/daily/score',
+            headers = {['x-access-token'] = USER.aToken},
+            body = {
+                date = date or os.date("!%Y-%m-%d"),
+                timeMs = timeMs,
+                pieceCount = pieceCount,
+            },
+            silentError = false,
+        }, 6)
+        if res and res.code and math.floor(res.code/100) == 2 and res.data then
+            local sec = (res.data.bestTime or timeMs) / 1000
+            local rankStr = res.data.rank and res.data.rank > 0 and (" · Rank #" .. res.data.rank) or ""
+            MES.new('check', ("Daily Challenge: " .. STRING.time(sec) .. rankStr))
+            if cb then cb(true, res.data) end
+        elseif res and res.message then
+            MES.new('warn', res.message)
+            if cb then cb(false, res) end
+        end
+    end)
+end
+
+function NET.getDailyLeaderboard(targetDate, cb)
+    TASK.new(function()
+        local path = '/api/daily/leaderboard'
+        if targetDate then
+            path = path .. '?date=' .. targetDate
+        end
+        local res = getMsg({
+            pool = 'dailyLb',
+            url = AUTHHOST,
+            path = path,
+            silentError = true,
+        }, 5)
+        if res and res.code and math.floor(res.code/100) == 2 and res.data then
+            if cb then cb(true, res.data.leaderboard or res.data) end
+        else
+            if cb then cb(false, nil) end
+        end
+    end)
+end
+
 -- Save
 -- Submit a Quick Play score to the server. Fire-and-forget: the result (best
 -- score + leaderboard rank) is surfaced as a message if the request succeeds.

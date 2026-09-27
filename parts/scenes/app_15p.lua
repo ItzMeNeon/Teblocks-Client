@@ -57,11 +57,11 @@ local function moveR(x,y)
     end
 end
 local function shuffleBoard()
-    for i=1,300 do
-        i=rnd()
-        if i<.25 then moveU(cx,cy)
-        elseif i<.5 then moveD(cx,cy)
-        elseif i<.75 then moveL(cx,cy)
+    for step=1,300 do
+        local r=rnd()
+        if r<.25 then moveU(cx,cy)
+        elseif r<.5 then moveD(cx,cy)
+        elseif r<.75 then moveL(cx,cy)
         else moveR(cx,cy)
         end
     end

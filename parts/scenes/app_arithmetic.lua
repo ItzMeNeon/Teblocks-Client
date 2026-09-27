@@ -44,9 +44,8 @@ local function drawChar(char,x,y,scale,alignLeft)
             for j=1,#charData[n],2 do
                 drawLines[index][j]=charData[n][j]*3*scale+x
                 drawVel[index][j]=0
-                j=j+1
-                drawLines[index][j]=charData[n][j]*3*scale+y
-                drawVel[index][j]=0
+                drawLines[index][j+1]=charData[n][j+1]*3*scale+y
+                drawVel[index][j+1]=0
             end
         end
         index=index+1

@@ -295,54 +295,72 @@ function scene.draw()
 
             -- Rank
             if unlocked==1 then
-                name=RANK_CHARS[rank]
-                if name then
+                local rankName=RANK_CHARS[rank]
+                if rankName then
                     gc_setColor(COLOR.dX)
-                    GC.mStr(name,M.x+M.size*.7,M.y-50-M.size*.7)
+                    GC.mStr(rankName,M.x+M.size*.7,M.y-50-M.size*.7)
                     gc_setColor(RANK_COLORS[rank])
-                    GC.mStr(name,M.x+M.size*.7+4,M.y-50-M.size*.7-4)
+                    GC.mStr(rankName,M.x+M.size*.7+4,M.y-50-M.size*.7-4)
                 end
             end
         end
     end
     gc_pop()
 
-    -- Score board
+    -- Score board (TETR.IO / osu! style dark glass side panel)
     if sel then
         local M=MODES[sel]
-        gc_setColor(COLOR.lX)
-        gc_rectangle('fill',920,0,360,720,5)-- Info board
-        gc_setColor(COLOR.Z)
+        -- Info board glass container
+        gc_setColor(0.04, 0.06, 0.15, 0.94)
+        gc_rectangle('fill',920,0,360,720)
+        -- Left neon accent edge
+        gc_setColor(0.25, 0.65, 1.0, 0.80)
+        gc_setLineWidth(2)
+        gc_line(920, 0, 920, 720)
+
         local modeText=text.modes[sel]
         if modeText then
-            setFont(40)GC.mStr(modeText[1],1100,5)
-            setFont(30)GC.mStr(modeText[2],1100,50)
-            setFont(25)gc_printf(modeText[3],920,110,360,'center')
+            gc_setColor(1, 1, 1, 0.98)
+            setFont(38)GC.mStr(modeText[1],1100,10)
+            gc_setColor(0.35, 0.85, 1.0, 0.95)
+            setFont(26)GC.mStr(modeText[2],1100,56)
+            gc_setColor(0.80, 0.88, 1.0, 0.85)
+            setFont(22)gc_printf(modeText[3],930,110,340,'center')
         end
         if M.slowMark then
             gc_draw(IMG.ctrlSpeedLimit,1230,50,nil,.4)
         end
         if M.score then
+            gc_setColor(1.0, 0.85, 0.30, 0.95)
             mText(TEXTOBJ.highScore,1100,240)
-            gc_setColor(COLOR.X)
-            gc_rectangle('fill',940,290,320,280,5)-- Highscore board
+
+            -- Modern dark glass highscore board
+            gc_setColor(0.06, 0.09, 0.22, 0.88)
+            gc_rectangle('fill',940,290,320,280,8)
+            gc_setColor(0.28, 0.48, 0.85, 0.65)
+            gc_setLineWidth(1.5)
+            gc_rectangle('line',940,290,320,280,8)
+
             local L=M.records
-            gc_setColor(1,1,1)
             if visibleModes[sel]==2 then
+                gc_setColor(1, 0.4, 0.4, 0.9)
                 mText(TEXTOBJ.modeLocked,1100,370)
             elseif L[1] then
                 for i=1,#L do
                     local t=M.scoreDisp(L[i])
                     local f=floor((30-#t*.5)/5)*5
                     setFont(f)
+                    gc_setColor(1, 1, 1, 0.95)
                     gc_print(t,955,275+25*i+17-f*.7)
                     _=L[i].date
                     if _ then
                         setFont(10)
+                        gc_setColor(0.55, 0.70, 0.95, 0.75)
                         gc_print(_,1155,285+25*i)
                     end
                 end
             else
+                gc_setColor(0.65, 0.75, 0.90, 0.65)
                 mText(TEXTOBJ.noScore,1100,370)
             end
         end
@@ -359,8 +377,8 @@ end
 
 scene.widgetList={
     WIDGET.newKey{name='mod',     x=140,y=655,w=220,h=80,font=35,code=goScene'mod'},
-    WIDGET.newButton{name='start',x=1040,y=655,w=180,h=80,font=40,code=pressKey'return',hideF=function() return not mapCam.sel end},
-    WIDGET.newButton{name='back', x=1200,y=655,w=120,h=80,sound='back',font=60,fText=CHAR.icon.back,code=backScene},
+    WIDGET.newButton{name='start',x=1040,y=655,w=180,h=80,color='lG',font=40,code=pressKey'return',hideF=function() return not mapCam.sel end},
+    WIDGET.newButton{name='back', x=1200,y=655,w=120,h=80,color='lR',sound='back',font=60,fText=CHAR.icon.back,code=backScene},
 }
 
 return scene

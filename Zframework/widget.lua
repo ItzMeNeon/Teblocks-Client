@@ -184,54 +184,91 @@ end
 button.setText=button.setObject
 
 function button:draw()
-    local x,y,w,h=self.x,self.y,self.w,self.h
-    local ATV=self.ATV
-    local c=self.color
-    if type(c)=='string' then c=COLOR[c] or COLOR.Z end
-    c=c or COLOR.Z
-    local r,g,b=c[1] or 0.5,c[2] or 0.5,c[3] or 0.5
+    local x, y, w, h = self.x, self.y, self.w, self.h
+    local ATV = self.ATV
+    local atvNorm = ATV / 8 -- 0..1
+    local c = self.color
+    if type(c) == 'string' then c = COLOR[c] or COLOR.Z end
+    c = c or COLOR.Z
+    local r, g, b = c[1] or 0.5, c[2] or 0.5, c[3] or 0.5
 
-    -- Button
-    gc_setColor(.15+r*.7,.15+g*.7,.15+b*.7,.9)
-    gc_rectangle('fill',x-ATV,y,w+2*ATV,h,4)
-    gc_setLineWidth(2)
-    gc_setColor(.3+r*.7,.3+g*.7,.3+b*.7)
-    gc_rectangle('line',x-ATV,y,w+2*ATV,h,5)
-    if ATV>0 then
-        gc_setColor(.97,.97,.97,ATV*.125)
-        gc_rectangle('line',x-ATV,y,w+2*ATV,h,3)
+    local rad = math.min(10, math.max(6, math.floor(h * 0.22)))
+    local bx = x - ATV
+    local bw = w + 2 * ATV
+
+    -- 1. Outer Neon Glow on hover / active (TETR.IO / osu! signature)
+    if atvNorm > 0.02 then
+        gc_setLineWidth(3)
+        gc_setColor(r, g, b, atvNorm * 0.35)
+        gc_rectangle('line', bx - 1, y - 1, bw + 2, h + 2, rad + 1)
+        gc_setLineWidth(1)
+        gc_setColor(1, 1, 1, atvNorm * 0.30)
+        gc_rectangle('line', bx, y, bw, h, rad)
     end
 
-    -- Drawable
-    local obj=self.obj
-    local ox,oy=obj:getWidth()*.5,obj:getHeight()*.5
-    local y0=y+h*.5
-    gc_setColor(1,1,1,.2+ATV*.05)
-    if self.align=='L' or self.textAlreadyWrapped then
-        local edge=self.edge
-        gc_draw(obj,x+edge-1,y0-1-oy)
-        gc_draw(obj,x+edge-1,y0+1-oy)
-        gc_draw(obj,x+edge+1,y0-1-oy)
-        gc_draw(obj,x+edge+1,y0+1-oy)
-        gc_setColor(r*.55,g*.55,b*.55)
-        gc_draw(obj,x+edge,y0-oy)
-    elseif self.align=='R' then
-        local x0=x+w-self.edge-ox*2
-        gc_draw(obj,x0-1,y0-1-oy)
-        gc_draw(obj,x0-1,y0+1-oy)
-        gc_draw(obj,x0+1,y0-1-oy)
-        gc_draw(obj,x0+1,y0+1-oy)
-        gc_setColor(r*.55,g*.55,b*.55)
-        gc_draw(obj,x0,y0-oy)
-    else--if self.align=='M' then
-        local x0=x+w*.5
-        local kx=obj:type()=='Text' and min(w/ox/2,1) or 1
-        gc_draw(obj,x0-1,y0-1,nil,kx,1,ox,oy)
-        gc_draw(obj,x0-1,y0+1,nil,kx,1,ox,oy)
-        gc_draw(obj,x0+1,y0-1,nil,kx,1,ox,oy)
-        gc_draw(obj,x0+1,y0+1,nil,kx,1,ox,oy)
-        gc_setColor(r*.55,g*.55,b*.55)
-        gc_draw(obj,x0,y0,nil,kx,1,ox,oy)
+    -- 2. Translucent obsidian glass card body
+    gc_setColor(0.04 + r * 0.05, 0.06 + g * 0.05, 0.11 + b * 0.08, 0.84 + atvNorm * 0.12)
+    gc_rectangle('fill', bx, y, bw, h, rad)
+
+    -- 3. Top subtle sheen / glass reflection
+    gc_setColor(1, 1, 1, 0.04 + atvNorm * 0.06)
+    gc_rectangle('fill', bx + 2, y + 2, bw - 4, math.max(2, math.floor(h * 0.42)), rad)
+
+    -- 4. Left Vibrant Neon Accent Strip (osu! / TETR.IO pill indicator)
+    local stripW = math.max(4, math.min(7, math.floor(w * 0.035))) + math.floor(atvNorm * 2)
+    local stripH = math.max(h - 8, 4)
+    local stripY = y + (h - stripH) * 0.5
+    gc_setColor(r, g, b, 0.85 + atvNorm * 0.15)
+    gc_rectangle('fill', bx + 3, stripY, stripW, stripH, 2)
+    if atvNorm > 0.05 then
+        gc_setColor(r, g, b, atvNorm * 0.45)
+        gc_rectangle('line', bx + 2, stripY - 1, stripW + 2, stripH + 2, 3)
+    end
+
+    -- 5. Sleek Border Frame
+    gc_setLineWidth(1.5)
+    gc_setColor(r * 0.55 + 0.15, g * 0.55 + 0.15, b * 0.55 + 0.25, 0.45 + atvNorm * 0.45)
+    gc_rectangle('line', bx, y, bw, h, rad)
+
+    -- 6. High-Contrast Crisp Typography & Icon Rendering
+    local obj = self.obj
+    local ox, oy = obj:getWidth() * 0.5, obj:getHeight() * 0.5
+    local y0 = y + h * 0.5
+
+    -- Determine text color: pure white when hovered, gleaming high-contrast tint when idle
+    local textR = 0.90 + r * 0.10 + atvNorm * 0.10
+    local textG = 0.92 + g * 0.08 + atvNorm * 0.08
+    local textB = 0.96 + b * 0.04 + atvNorm * 0.04
+    local textAlpha = 0.92 + atvNorm * 0.08
+
+    -- Left text padding offset to respect the left accent strip
+    local leftOffset = stripW + 4
+
+    if self.align == 'L' or self.textAlreadyWrapped then
+        local edge = self.edge + leftOffset
+        -- Subtle soft shadow
+        gc_setColor(0, 0, 0, 0.75)
+        gc_draw(obj, x + edge + 1, y0 - oy + 1.5)
+        -- Crisp gleaming text
+        gc_setColor(textR, textG, textB, textAlpha)
+        gc_draw(obj, x + edge, y0 - oy)
+    elseif self.align == 'R' then
+        local x0 = x + w - self.edge - ox * 2
+        -- Subtle soft shadow
+        gc_setColor(0, 0, 0, 0.75)
+        gc_draw(obj, x0 + 1, y0 - oy + 1.5)
+        -- Crisp gleaming text
+        gc_setColor(textR, textG, textB, textAlpha)
+        gc_draw(obj, x0, y0 - oy)
+    else -- align == 'M'
+        local x0 = x + w * 0.5
+        local kx = obj:type() == 'Text' and min(w / ox / 2, 1) or 1
+        -- Subtle soft shadow
+        gc_setColor(0, 0, 0, 0.75)
+        gc_draw(obj, x0 + 1, y0 + 1.5, nil, kx, 1, ox, oy)
+        -- Crisp gleaming text
+        gc_setColor(textR, textG, textB, textAlpha)
+        gc_draw(obj, x0, y0, nil, kx, 1, ox, oy)
     end
 end
 function button:getInfo()
@@ -342,51 +379,72 @@ function key:update(dt)
     end
 end
 function key:draw()
-    local x,y,w,h=self.x,self.y,self.w,self.h
-    local ATV=self.ATV
-    local c=self.color
-    if type(c)=='string' then c=COLOR[c] or COLOR.Z end
-    c=c or COLOR.Z
-    local align=self.align
-    local r,g,b=c[1] or 0.5,c[2] or 0.5,c[3] or 0.5
+    local x, y, w, h = self.x, self.y, self.w, self.h
+    local ATV = self.ATV
+    local atvNorm = ATV / 4 -- 0..1
+    local c = self.color
+    if type(c) == 'string' then c = COLOR[c] or COLOR.Z end
+    c = c or COLOR.Z
+    local align = self.align
+    local r, g, b = c[1] or 0.5, c[2] or 0.5, c[3] or 0.5
+
+    local rad = math.min(8, math.max(4, math.floor(h * 0.2)))
 
     -- Fill
     if self.fShade then
-        gc_setColor(r,g,b,ATV*.25)
-        if align=='M' then
-            gc_draw(self.fShade,x+w*.5-self.fShade:getWidth()*.5,y+h*.5-self.fShade:getHeight()*.5)
-        elseif align=='L' then
-            gc_draw(self.fShade,x+self.edge,y+h*.5-self.fShade:getHeight()*.5)
-        elseif align=='R' then
-            gc_draw(self.fShade,x+w-self.edge-self.fShade:getWidth(),y+h*.5-self.fShade:getHeight()*.5)
+        gc_setColor(r, g, b, ATV * 0.25)
+        if align == 'M' then
+            gc_draw(self.fShade, x + w * 0.5 - self.fShade:getWidth() * 0.5, y + h * 0.5 - self.fShade:getHeight() * 0.5)
+        elseif align == 'L' then
+            gc_draw(self.fShade, x + self.edge, y + h * 0.5 - self.fShade:getHeight() * 0.5)
+        elseif align == 'R' then
+            gc_draw(self.fShade, x + w - self.edge - self.fShade:getWidth(), y + h * 0.5 - self.fShade:getHeight() * 0.5)
         end
     else
-        -- Background
-        gc_setColor(0,0,0,.3)
-        gc_rectangle('fill',x,y,w,h,4)
+        -- Background: dark translucent glass
+        gc_setColor(0.04 + r * 0.04, 0.06 + g * 0.04, 0.11 + b * 0.06, 0.82 + atvNorm * 0.12)
+        gc_rectangle('fill', x, y, w, h, rad)
 
-        -- Frame
-        gc_setColor(.2+r*.8,.2+g*.8,.2+b*.8,.7)
-        gc_setLineWidth(2)
-        gc_rectangle('line',x,y,w,h,3)
+        -- Top sheen
+        gc_setColor(1, 1, 1, 0.04 + atvNorm * 0.06)
+        gc_rectangle('fill', x + 1, y + 1, w - 2, math.floor(h * 0.4), rad)
 
-        -- Shade
-        gc_setColor(1,1,1,ATV*.05)
-        gc_rectangle('fill',x,y,w,h,3)
+        -- Glowing Frame
+        if atvNorm > 0.05 then
+            gc_setLineWidth(3)
+            gc_setColor(r, g, b, atvNorm * 0.35)
+            gc_rectangle('line', x - 1, y - 1, w + 2, h + 2, rad + 1)
+        end
+        gc_setLineWidth(1.5)
+        gc_setColor(r * 0.6 + 0.2, g * 0.6 + 0.2, b * 0.6 + 0.3, 0.5 + atvNorm * 0.45)
+        gc_rectangle('line', x, y, w, h, rad)
     end
 
-    -- Drawable
-    local obj=self.obj
-    local ox,oy=obj:getWidth()*.5,obj:getHeight()*.5
+    -- Drawable: Crisp high contrast
+    local obj = self.obj
+    local ox, oy = obj:getWidth() * 0.5, obj:getHeight() * 0.5
 
-    gc_setColor(r,g,b)
-    if align=='L' or self.textAlreadyWrapped then
-        gc_draw(obj,x+self.edge,y+h*.5-oy)
-    elseif align=='R' then
-        gc_draw(obj,x+w-self.edge-ox*2,y-oy+h*.5)
-    else--if align=='M' then
-        local kx=obj:type()=='Text' and min(w/ox/2,1) or 1
-        gc_draw(obj,x+w*.5,y+h*.5,nil,kx,1,ox,oy)
+    local textR = 0.90 + r * 0.10 + atvNorm * 0.10
+    local textG = 0.92 + g * 0.08 + atvNorm * 0.08
+    local textB = 0.96 + b * 0.04 + atvNorm * 0.04
+
+    if align == 'L' or self.textAlreadyWrapped then
+        gc_setColor(0, 0, 0, 0.7)
+        gc_draw(obj, x + self.edge + 1, y + h * 0.5 - oy + 1)
+        gc_setColor(textR, textG, textB, 0.95 + atvNorm * 0.05)
+        gc_draw(obj, x + self.edge, y + h * 0.5 - oy)
+    elseif align == 'R' then
+        local x0 = x + w - self.edge - ox * 2
+        gc_setColor(0, 0, 0, 0.7)
+        gc_draw(obj, x0 + 1, y - oy + h * 0.5 + 1)
+        gc_setColor(textR, textG, textB, 0.95 + atvNorm * 0.05)
+        gc_draw(obj, x0, y - oy + h * 0.5)
+    else -- align == 'M'
+        local kx = obj:type() == 'Text' and min(w / ox / 2, 1) or 1
+        gc_setColor(0, 0, 0, 0.7)
+        gc_draw(obj, x + w * 0.5 + 1, y + h * 0.5 + 1, nil, kx, 1, ox, oy)
+        gc_setColor(textR, textG, textB, 0.95 + atvNorm * 0.05)
+        gc_draw(obj, x + w * 0.5, y + h * 0.5, nil, kx, 1, ox, oy)
     end
 end
 function key:getInfo()
@@ -477,33 +535,42 @@ function switch:update(dt)
     end
 end
 function switch:draw()
-    local x,y=self.x,self.y
-    local ATV=self.ATV
+    local x, y = self.x, self.y
+    local ATV = self.ATV
+    local atvNorm = ATV / 8
 
-    -- Background
-    gc_setColor(0,0,0,.3)
-    gc_rectangle('fill',x,y-25,50,50,4)
+    -- Background: Dark glass rounded box
+    gc_setColor(0.04, 0.06, 0.12, 0.85)
+    gc_rectangle('fill', x, y - 25, 50, 50, 8)
 
-    -- Frame
-    gc_setLineWidth(2)
-    gc_setColor(1,1,1,.6+ATV*.1)
-    gc_rectangle('line',x,y-25,50,50,3)
+    -- Top glass sheen
+    gc_setColor(1, 1, 1, 0.04 + atvNorm * 0.06)
+    gc_rectangle('fill', x + 2, y - 23, 46, 20, 6)
 
-    -- Checked
-    if ATV>0 then
-        gc_setColor(1,1,1,ATV*.06)
-        gc_rectangle('fill',x,y-25,50,50,3)
+    -- Frame: Neon glow on hover
+    if atvNorm > 0.05 then
+        gc_setLineWidth(3)
+        gc_setColor(0.20, 0.60, 1.0, atvNorm * 0.35)
+        gc_rectangle('line', x - 1, y - 26, 52, 52, 9)
     end
-    if self.CHK>0 then
-        gc_setColor(.9,1,.9,self.CHK/6)
-        gc_setLineWidth(5)
-        gc_line(x+5,y,x+18,y+13,x+45,y-14)
+    gc_setLineWidth(1.5)
+    gc_setColor(0.35, 0.55, 0.85, 0.50 + atvNorm * 0.40)
+    gc_rectangle('line', x, y - 25, 50, 50, 8)
+
+    -- Checked: Glowing checkmark
+    if self.CHK > 0 then
+        local chkAlpha = self.CHK / 6
+        gc_setColor(0.15, 0.95, 0.45, chkAlpha * 0.20)
+        gc_rectangle('fill', x + 2, y - 23, 46, 46, 6)
+        gc_setColor(0.20, 1.0, 0.55, chkAlpha)
+        gc_setLineWidth(4)
+        gc_line(x + 10, y + 1, x + 20, y + 13, x + 40, y - 11)
     end
 
     -- Drawable
-    local obj=self.obj
+    local obj = self.obj
     gc_setColor(self.color)
-    gc_draw(obj,x-12-ATV,y,nil,min(self.lim/obj:getWidth(),1),1,obj:getWidth(),obj:getHeight()*.5)
+    gc_draw(obj, x - 12 - ATV, y, nil, min(self.lim / obj:getWidth(), 1), 1, obj:getWidth(), obj:getHeight() * 0.5)
 end
 function switch:getInfo()
     return("x=%d,y=%d,font=%d"):format(self.x,self.y,self.font,self.fType)

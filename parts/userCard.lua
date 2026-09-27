@@ -318,9 +318,9 @@ function CARD.draw()
         if isLogged then
             local rank = STAT.globalRank or 0
             local rankStr = rank > 0 and ("#" .. rank) or "Unranked"
-            local elo = STAT.elo or 1200
-            gc_setColor(.55, .72, .95, .85 * CARD.alpha)
-            gc_print(("★ %d ELO   %s"):format(elo, rankStr), tx, cardY + 22)
+            local elo = STAT.elo or 100
+            gc_setColor(.35, .85, 1.0, .90 * CARD.alpha)
+            gc_print(("S0 • %d ELO   %s"):format(elo, rankStr), tx, cardY + 22)
         else
             gc_setColor(.95, .75, .25, .85 * CARD.alpha)
             gc_print("Click to Log In", tx, cardY + 22)
@@ -358,11 +358,11 @@ function CARD.draw()
             gc_setColor(1, 1, 1, .95 * CARD.menuAlpha)
             gc_print(uname, menuX + 14, menuY + 10)
             setFont(10)
-            local elo = STAT.elo or 1200
+            local elo = STAT.elo or 100
             local rank = STAT.globalRank or 0
             local rankStr = rank > 0 and ("#" .. rank) or "Unranked"
-            gc_setColor(.55, .75, 1, .85 * CARD.menuAlpha)
-            gc_print(("Rating: %d ELO  •  %s"):format(elo, rankStr), menuX + 14, menuY + 26)
+            gc_setColor(.45, .85, 1.0, .90 * CARD.menuAlpha)
+            gc_print(("Season 0: %d ELO  •  %s"):format(elo, rankStr), menuX + 14, menuY + 26)
         else
             setFont(12)
             gc_setColor(.95, .75, .25, .95 * CARD.menuAlpha)

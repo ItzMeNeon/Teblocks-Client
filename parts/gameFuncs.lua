@@ -667,7 +667,11 @@ function gameOver()-- Save record
                     end
                 end
                 local D=M.score(P)
-                if QUICKPLAY_MODES[M.name] then
+                if M.name == 'sprint_40l' and P.stat.row >= 40 and not GAME.replaying then
+                    local dDate = GAME.dailyDate or os.date("!%Y-%m-%d")
+                    local timeMs = math.floor(P.stat.time * 1000)
+                    NET.submitDailyScore(dDate, timeMs, P.stat.piece)
+                elseif QUICKPLAY_MODES[M.name] then
                     NET.submitQuickPlayScore(M.name,P.stat.score)
                 end
                 local L=M.records

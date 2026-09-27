@@ -355,13 +355,13 @@ function scene.draw()
     -- Draw track line
     gc.setColor(COLOR.D)
     gc.setLineWidth(2)
-    for x=1,5 do
-        x=130+170*x
-        gc.line(x,0,x,720)
+    for i=1,5 do
+        local lx=130+170*i
+        gc.line(lx,0,lx,720)
     end
-    for y=0,6 do
-        y=720-120*y-height%120
-        gc.line(300,y,980,y)
+    for i=0,6 do
+        local ly=720-120*i-height%120
+        gc.line(300,ly,980,ly)
     end
 
     -- Draw red tile

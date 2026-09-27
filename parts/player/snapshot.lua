@@ -25,12 +25,14 @@ local function _copyTable(t)
 end
 
 local function _snapField(field)
-    -- field is a list-of-lists [y][x]; snapshot as rows of ints.
+    -- field is a list-of-lists [y][x]; snapshot as rows of ints + garbage flag.
     local rows={}
     for y=1,#field do
         local r=field[y]
         local out={}
         for x=1,#r do out[x]=r[x] or 0 end
+        -- Preserve the garbage-line flag so seek accuracy is maintained.
+        out.garbage=r.garbage or false
         rows[y]=out
     end
     return rows
@@ -45,10 +47,40 @@ local function _restoreField(field, rows)
             field[y]=dst
         end
         for x=1,#r do dst[x]=r[x] end
+        -- Restore the garbage-line flag to prevent seek accuracy loss.
+        dst.garbage=r.garbage or false
     end
     -- If the live field is taller than the snapshot (e.g. garbageRise happened
     -- after this snapshot), trim the surplus rows.
     for y=#rows+1,#field do field[y]=nil end
+end
+
+-- Shallow queue snapshot: store only id/dir/color so we don't deep-copy the
+-- piece's rotation tables (RS kick tables, bk arrays) into every keyframe.
+-- Cost per keyframe drops from ~hundreds of KB to a handful of integers.
+local function _snapQueue(q)
+    if not q then return {} end
+    local out={}
+    for i=1,#q do
+        local b=q[i]
+        out[i]={id=b.id, dir=b.dir or 0, color=b.color}
+    end
+    return out
+end
+
+local function _restoreQueue(P, snap)
+    if not snap then return {} end
+    local newQ={}
+    for i=1,#snap do
+        local s=snap[i]
+        if s and s.id then
+            local blk=P:_getBlock(s.id, nil, s.color)
+            blk.dir=s.dir or blk.dir
+            blk.bk=BLOCKS[s.id][s.dir or 0]
+            newQ[i]=blk
+        end
+    end
+    return newQ
 end
 
 local function _snapRNG(P)
@@ -112,7 +144,9 @@ function M.snapshot(P)
         trigFrame=P.trigFrame,
         -- board + visible pieces
         field=_snapField(P.field),
-        visTime=_copyTable(P.visTime),
+        -- visTime is cosmetic (block-appear animation) and not simulation state;
+        -- omitting it from keyframes saves ~400 table entries per player per
+        -- keyframe without affecting seek correctness.
         garbageBeneath=P.garbageBeneath,
         fieldBeneath=P.fieldBeneath,
         fieldUp=P.fieldUp,
@@ -124,9 +158,10 @@ function M.snapshot(P)
         freshTime=P.freshTime, spinLast=P.spinLast,
         ctrlCount=P.ctrlCount,
         movDir=P.movDir, moving=P.moving, downing=P.downing,
-        -- queues
-        nextQueue=_copyTable(P.nextQueue),
-        holdQueue=_copyTable(P.holdQueue),
+        -- queues (shallow: only id/dir/color; bk arrays are reconstructed on restore)
+        nextQueue=_snapQueue(P.nextQueue),
+        holdQueue=_snapQueue(P.holdQueue),
+        seqHistoryIndex=P.seqHistoryIndex,
         holdTime=P.holdTime,
         holdIXSFromNext=P.holdIXSFromNext,
         pieceCount=P.pieceCount,
@@ -151,7 +186,7 @@ function M.snapshot(P)
         bufferedIHS=P.bufferedIHS,
         bufferedIMS=P.bufferedIMS,
         bufferedDelay=P.bufferedDelay,
-        -- stream
+        -- stream (shared reference — not copied; the list is read-only during replay)
         stream=P.stream,
         streamProgress=P.streamProgress,
         -- status
@@ -178,7 +213,19 @@ function M.restore(P, s)
     P.frameRun=s.frameRun
     P.trigFrame=s.trigFrame
     _restoreField(P.field, s.field)
-    P.visTime=s.visTime or {}
+    -- visTime is not snapshotted (cosmetic only). Reset all rows to fully
+    -- visible (20) so the draw pass doesn't show stale animation values.
+    if s.visTime then
+        P.visTime=s.visTime
+    else
+        local showTime=P.showTime or 20
+        for y=1,#P.field do
+            local vr=P.visTime[y]
+            if vr then
+                for x=1,#vr do vr[x]=showTime end
+            end
+        end
+    end
     P.garbageBeneath=s.garbageBeneath
     P.fieldBeneath=s.fieldBeneath
     P.fieldUp=s.fieldUp
@@ -197,51 +244,14 @@ function M.restore(P, s)
     P.moving=s.moving
     P.downing=s.downing
 
-    P.nextQueue=s.nextQueue or {}
-    P.holdQueue=s.holdQueue or {}
+    P.nextQueue=_restoreQueue(P, s.nextQueue or {})
+    P.holdQueue=_restoreQueue(P, s.holdQueue or {})
+    P.seqHistoryIndex=s.seqHistoryIndex or P.seqHistoryIndex
     P.holdTime=s.holdTime
     P.holdIXSFromNext=s.holdIXSFromNext
     P.pieceCount=s.pieceCount
 
     _restoreRNG(P, s.rng or {})
-    -- Rebuild the seqGen coroutine from the restored seqRND. The first
-    -- resume passes (seqRND, seqData); subsequent resumes pass (field, stat)
-    -- matching parts/player/init.lua:366-372.
-    if P.seqGen and P.gameEnv and P.gameEnv.sequence then
-        local getSeqGen=require'parts.player.seqGenerators'
-        local seqCalled=false
-        local initSZOcount=0
-        local bagLineCounter=0
-        local seqGen=coroutine.create(getSeqGen(P.gameEnv.sequence))
-        P.newNext=function()
-            local status,piece
-            if seqCalled then
-                status,piece=coroutine.resume(seqGen,P.field,P.stat)
-            else
-                status,piece=coroutine.resume(seqGen,P.seqRND,P.gameEnv.seqData)
-                seqCalled=true
-            end
-            if not status then
-                assert(piece=='cannot resume dead coroutine')
-            elseif piece then
-                if P.gameEnv.noInitSZO and initSZOcount<5 then
-                    initSZOcount=initSZOcount+1
-                    if piece==1 or piece==2 or piece==6 then
-                        return P:newNext()
-                    else
-                        initSZOcount=5
-                    end
-                end
-                P:getNext(piece,bagLineCounter)
-                bagLineCounter=0
-            else
-                if P.gameEnv.bagLine then
-                    bagLineCounter=bagLineCounter+1
-                end
-                P:newNext()
-            end
-        end
-    end
 
     P.atkBuffer=s.atkBuffer or {}
     P.atkBufferSum=s.atkBufferSum

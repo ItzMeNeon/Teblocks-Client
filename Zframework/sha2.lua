@@ -252,11 +252,11 @@ elseif branch == "EMUL" then
    local idx = 0
    for y = 0, 127 * 256, 256 do
       for x = y, y + 127 do
-         x = AND_of_two_bytes[x] * 2
-         AND_of_two_bytes[idx] = x
-         AND_of_two_bytes[idx + 1] = x
-         AND_of_two_bytes[idx + 256] = x
-         AND_of_two_bytes[idx + 257] = x + 1
+         local val = AND_of_two_bytes[x] * 2
+         AND_of_two_bytes[idx] = val
+         AND_of_two_bytes[idx + 1] = val
+         AND_of_two_bytes[idx + 256] = val
+         AND_of_two_bytes[idx + 257] = val + 1
          idx = idx + 2
       end
       idx = idx + 256

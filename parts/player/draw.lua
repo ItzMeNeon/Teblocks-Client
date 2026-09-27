@@ -439,13 +439,28 @@ local function _drawB2Bbar(b2b,b2b1)
     local a,b=b2b,b2b1
     if a>b then a,b=b,a end
     if b>0 then
-        gc_setColor(.8,1,.2)
-        gc_rectangle('fill',-14,600-b*.6,11,b*.6,2)
-        gc_setColor(b2b<50 and COLOR.Z or b2b<=800 and COLOR.lR or COLOR.lB)
-        gc_rectangle('fill',-14,600-a*.6,11,a*.6,2)
+        -- Background track
+        gc_setColor(0.04, 0.06, 0.12, 0.7)
+        gc_rectangle('fill', -14, 0, 11, 600, 3)
+        gc_setColor(0.2, 0.35, 0.6, 0.4)
+        gc_setLineWidth(1)
+        gc_rectangle('line', -14, 0, 11, 600, 3)
+
+        -- Trail
+        gc_setColor(1.0, 0.85, 0.25, 0.6)
+        gc_rectangle('fill', -14, 600-b*.6, 11, b*.6, 3)
+
+        -- Active bar
+        local col = b2b < 50 and COLOR.Z or b2b <= 800 and {1.0, 0.35, 0.45} or {0.25, 0.85, 1.0}
+        gc_setColor(col[1], col[2], col[3], 0.95)
+        gc_rectangle('fill', -14, 600-a*.6, 11, a*.6, 3)
+        -- Glow
+        gc_setColor(col[1], col[2], col[3], 0.45)
+        gc_rectangle('line', -15, 600-a*.6-1, 13, a*.6+2, 4)
+
         if TIME()%.5<.3 then
-            gc_setColor(1,1,1)
-            gc_rectangle('fill',-15,b<50 and 570 or 120,13,3,2)
+            gc_setColor(1, 1, 1, 0.9)
+            gc_rectangle('fill', -15, b<50 and 570 or 120, 13, 3, 2)
         end
     end
 end
@@ -467,9 +482,22 @@ local function _drawHold(holdQueue,holdCount,holdTime,skinLib)
     local N=holdCount*72
     gc_push('transform')
         gc_translate(12,20)
-        gc_setLineWidth(2)
-        gc_setColor(0,0,0,.4)gc_rectangle('fill',0,0,100,N+8,5)
-        gc_setColor(.97,.97,.97)gc_rectangle('line',0,0,100,N+8,5)
+        -- Modern HOLD header
+        setFont(11)
+        gc_setColor(.45, .78, 1.0, .90)
+        GC.mStr("HOLD", 50, -17)
+
+        -- Dark glass container
+        gc_setColor(0.04, 0.06, 0.14, 0.85)
+        gc_rectangle('fill', 0, 0, 100, N+8, 8)
+        gc_setColor(1, 1, 1, 0.04)
+        gc_rectangle('fill', 2, 2, 96, math.min(22, math.floor((N+8)*0.3)), 6)
+
+        -- Glowing border
+        gc_setLineWidth(1.5)
+        gc_setColor(0.25, 0.55, 0.95, 0.70)
+        gc_rectangle('line', 0, 0, 100, N+8, 8)
+
         N=#holdQueue<holdCount and holdQueue[1] and 1 or holdTime+1
         gc_push('transform')
             gc_translate(50,40)
@@ -498,14 +526,26 @@ local function _drawNext(P,repMode)
     local ENV=P.gameEnv
     local texture=P.skinLib
     gc_translate(488,20)
-        gc_setLineWidth(2)
         local h=ENV.nextCount*72
-        gc_setColor(ENV.nextStartPos>1 and .5 or 0,0,0,.4)
-        gc_rectangle('fill',0,0,100,h+8,5)
-        gc_setColor(1,1,1,.626)
-        gc_draw(seqGenBanner[ENV.sequence],0,-11)
-        gc_setColor(.97,.97,.97)
+
+        -- Modern NEXT header
+        setFont(11)
+        gc_setColor(.45, .78, 1.0, .90)
+        GC.mStr("NEXT", 50, -17)
+
+        -- Dark glass container
+        gc_setColor(ENV.nextStartPos>1 and 0.08 or 0.04, 0.06, 0.14, 0.85)
+        gc_rectangle('fill', 0, 0, 100, h+8, 8)
+        gc_setColor(1, 1, 1, 0.04)
+        gc_rectangle('fill', 2, 2, 96, math.min(22, math.floor((h+8)*0.3)), 6)
+
+        -- Sequence banner
+        gc_setColor(1, 1, 1, .626)
+        gc_draw(seqGenBanner[ENV.sequence], 0, -11)
+
+        -- Hold mode indicators
         if ENV.holdMode=='swap' then
+            gc_setColor(.97,.97,.97)
             gc_rectangle('fill',100,72*ENV.holdCount+2,-50,4)
         elseif ENV.holdMode=='skip' then
             gc_setColor(.97,.97,.97,.26)
@@ -513,7 +553,12 @@ local function _drawNext(P,repMode)
             gc_setColor(.97,.97,.97)
             gc_rectangle('fill',100,72*ENV.holdCount+2,-50,4)
         end
-        gc_rectangle('line',0,0,100,h+8,5)
+
+        -- Glowing border
+        gc_setLineWidth(1.5)
+        gc_setColor(0.25, 0.55, 0.95, 0.70)
+        gc_rectangle('line', 0, 0, 100, h+8, 8)
+
         gc_push('transform')
             gc_translate(50,40)
 

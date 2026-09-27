@@ -45,7 +45,9 @@ local function _replayFinished()
         local P=PLAYERS[p]
         if P.stream and P.streamProgress then
             anyStream=true
-            if P.alive and P.stream[P.streamProgress] then
+            -- Use streamHasData() so the check works for both decoded-table
+            -- (live remote) and raw-bytes (replay) stream formats.
+            if P.alive and P:streamHasData() then
                 return false
             end
         end
@@ -90,8 +92,11 @@ local function _replayUpdate(dt)
         local SNAPSHOT=require('parts.player.snapshot')
         for s=1,steps do
             _stepPlayers(dt)
-            local curF=PLAYERS[1] and PLAYERS[1].frameRun
-            if curF and curF%60==0 and NET._replayKeyframes and not NET._replayKeyframes[curF] then
+            local curF=0
+            for p=1,#PLAYERS do
+                if PLAYERS[p].frameRun>curF then curF=PLAYERS[p].frameRun end
+            end
+            if curF>0 and curF%300==0 and NET._replayKeyframes and not NET._replayKeyframes[curF] then
                 local kSnap={players={}}
                 for p=1,#PLAYERS do
                     kSnap.players[p]=SNAPSHOT.snapshot(PLAYERS[p])
@@ -218,6 +223,32 @@ function scene.leave()
         NETPLY.clear()
         GAME.replaySetup=false
         GAME.replaying=false
+
+        -- Drop the keyframe cache: each keyframe is a deep copy of full player
+        -- state (field, nextQueue, atkBuffer, visTime…). A 10-minute match at
+        -- one keyframe per second produces 600+ snapshots; freeing them
+        -- immediately avoids a multi-hundred-MB spike before the next GC cycle.
+        NET._replayKeyframes=nil
+
+        -- Drop raw replay data and rep objects so decoded recording strings are
+        -- collected promptly instead of lingering until the next replay starts.
+        if NET._replayReps then
+            if NET._replayReps.myRep then NET._replayReps.myRep.data=nil end
+            if NET._replayReps.oppRep then NET._replayReps.oppRep.data=nil end
+            NET._replayReps=nil
+        end
+
+        -- Drop decoded stream lists held by players — they are no longer needed
+        -- once the replay scene exits.
+        for p=1,#PLAYERS do
+            local P=PLAYERS[p]
+            if P.stream then P.stream=nil end
+            P.streamProgress=nil
+        end
+
+        -- Suggest a GC pass now that the large tables are unreachable, so the
+        -- freed memory shows up in the OS before the next scene renders.
+        collectgarbage('collect')
     end
 end
 

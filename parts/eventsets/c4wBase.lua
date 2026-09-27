@@ -17,17 +17,17 @@ return {
         end
         if P.holeRND:random()<.6 then
             local initCell={11,14,12,13,21,24}
-            for _=1,3 do
-                _=rem(initCell,P.holeRND:random(#initCell))
-                F[math.floor(_/10)][3+_%10]=20
+            for step=1,3 do
+                local cell=rem(initCell,P.holeRND:random(#initCell))
+                F[math.floor(cell/10)][3+cell%10]=20
             end
         else
             local initCell={11,12,13,14,21,22,23,24}
             rem(initCell,P.holeRND:random(5,8))
             rem(initCell,P.holeRND:random(1,4))
-            for _=1,6 do
-                _=rem(initCell,P.holeRND:random(#initCell))
-                F[math.floor(_/10)][3+_%10]=20
+            for step=1,6 do
+                local cell=rem(initCell,P.holeRND:random(#initCell))
+                F[math.floor(cell/10)][3+cell%10]=20
             end
         end
     end

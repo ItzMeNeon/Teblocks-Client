@@ -243,6 +243,8 @@ local function _decode(str,p)
     until b<128
     return ret,p
 end
+-- Expose for replay streaming (player.lua and net.lua read varints on-the-fly)
+DATA.decodeVarint=_decode
 --[[
     Replay file:
     a zlib-compressed json table
@@ -375,6 +377,7 @@ function DATA.parseReplayData(fileName,fileData,ifFull)
         setting=metaData.setting,
         mod=metaData.mod,
         tasUsed=metaData.tasUsed,
+        private=metaData.private,
 
         -- Multiplayer and rich metadata fields
         netType=metaData.netType,
@@ -385,7 +388,9 @@ function DATA.parseReplayData(fileName,fileData,ifFull)
         result=metaData.result,
         myScore=metaData.myScore,
         oppScore=metaData.oppScore,
-        oppStream=metaData.oppStream,
+        -- oppStream is the full encoded opponent recording (can be hundreds of KB).
+        -- Only keep it in memory when the caller needs full data (ifFull=true).
+        oppStream=ifFull and metaData.oppStream or nil,
         duration=metaData.duration,
     }
     if ifFull then rep.data=fileData end
