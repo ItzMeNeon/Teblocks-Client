@@ -358,9 +358,26 @@ local function drawProfilePill(t)
     GC.setColor(1, 1, 1, .98)
     GC.print(displayName, tx, PROF_Y + 5)
 
-    -- Status dot (pulsating neon lime dot if logged in)
+    -- Status dot & Country / Region Banner Chip
     if isLogged then
-        local dotX = tx + FONT.get(13):getWidth(displayName) + 6
+        local nameW = FONT.get(13):getWidth(displayName)
+        local country = (USER and (USER.country or USER.region)) or (STAT and STAT.country) or "GL"
+        local cText = tostring(country):upper():sub(1, 4)
+        local cW = FONT.get(9):getWidth(cText) + 10
+        local cX = tx + nameW + 6
+
+        if cX + cW < PROF_X + PROF_W - 20 then
+            GC.setColor(0.12, 0.22, 0.40, 0.85)
+            GC.rectangle('fill', cX, PROF_Y + 5, cW, 14, 3)
+            GC.setColor(0.35, 0.65, 1.0, 0.70)
+            GC.setLineWidth(1)
+            GC.rectangle('line', cX, PROF_Y + 5, cW, 14, 3)
+            setFont(9)
+            GC.setColor(0.85, 0.92, 1.0, 0.95)
+            GC.mStr(cText, cX + cW * 0.5, PROF_Y + 6)
+        end
+
+        local dotX = cX + cW + 6
         if dotX < PROF_X + PROF_W - 20 then
             local pulse = 0.5 + 0.5 * math.sin(t * 5)
             GC.setColor(.20, 1.0, .50, .35 * pulse)

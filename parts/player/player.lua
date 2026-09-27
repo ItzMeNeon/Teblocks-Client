@@ -2614,23 +2614,21 @@ local function _updateMisc(P,dt)
             local ghostTop = P.ghoY + (P.cur.bk and #P.cur.bk or 2) - 1 + (P.fieldBeneath or 0) / 30
             if ghostTop > danger then danger = ghostTop end
         end
-        if P.control and P.cur and P.curY and danger >= topOut - 3 then
-            local pieceTop = P.curY + (P.cur.bk and #P.cur.bk or 2) - 1 + (P.fieldBeneath or 0) / 30
-            if pieceTop > danger then danger = pieceTop end
-        end
 
         local slideLines = 0
-        if danger >= topOut - 3 then
-            -- When 3-1 lines close to top out (rows 17-20 for 20-high board):
-            -- Slide down 4 lines, plus any extra lines if stack exceeds topOut
-            local overflow = math.max(danger - topOut, 0)
-            slideLines = 4 + overflow
+        if (not SETTING or SETTING.highCam ~= false) and danger >= topOut - 3.5 then
+            -- Smooth progressive slide when 3-1 lines close to top out:
+            -- Gently scales from ~0.4 up to 2.5 lines (max ~75-84px) to avoid excessive displacement
+            local progress = math.min(math.max((danger - (topOut - 3.5)) / 3.5, 0), 1)
+            local baseSlide = progress * 2.5
+            local overflow = math.max(danger - topOut, 0) * 0.4
+            slideLines = math.min(baseSlide + overflow, 2.8)
         end
-        y = 30 * math.min(slideLines, math.max(topOut - 5, 15))
+        y = 30 * slideLines
     end
     local f = P.fieldUp
     if f ~= y then
-        P.fieldUp = f > y and math.max(approach(f, y, dt * 6) - 2, y) or math.min(approach(f, y, dt * 6) + 1, y)
+        P.fieldUp = f > y and math.max(approach(f, y, dt * 7) - 1.5, y) or math.min(approach(f, y, dt * 7) + 1, y)
     end
 
     -- Update Score

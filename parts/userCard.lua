@@ -304,9 +304,26 @@ function CARD.draw()
         gc_setColor(.95, .98, 1, .95 * CARD.alpha)
         gc_print(displayName, tx, cardY + 5)
 
-        -- Status dot (online green dot if logged in)
+        -- Status dot & Country / Region Banner Chip
         if isLogged then
-            local dotX = tx + FONT.get(13):getWidth(displayName) + 6
+            local nameW = FONT.get(13):getWidth(displayName)
+            local country = (USER and (USER.country or USER.region)) or (STAT and STAT.country) or "GL"
+            local cText = tostring(country):upper():sub(1, 4)
+            local cW = FONT.get(9):getWidth(cText) + 10
+            local cX = tx + nameW + 6
+
+            if cX + cW < cardX + CARD.w - 20 then
+                gc_setColor(0.12, 0.22, 0.40, 0.85 * CARD.alpha)
+                gc.rectangle('fill', cX, cardY + 5, cW, 14, 3)
+                gc_setColor(0.35, 0.65, 1.0, 0.70 * CARD.alpha)
+                gc_setLineWidth(1)
+                gc.rectangle('line', cX, cardY + 5, cW, 14, 3)
+                setFont(9)
+                gc_setColor(0.85, 0.92, 1.0, 0.95 * CARD.alpha)
+                GC.mStr(cText, cX + cW * 0.5, cardY + 6)
+            end
+
+            local dotX = cX + cW + 6
             if dotX < cardX + CARD.w - 20 then
                 gc_setColor(.2, .85, .4, .9 * CARD.alpha)
                 gc.circle('fill', dotX, cardY + 11, 3.5)

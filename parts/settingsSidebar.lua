@@ -72,10 +72,10 @@ SETTINGS.categories = {
 local sectionY = {
     gameplay = 0,
     graphics = 380,
-    audio = 860,
-    controls = 1280,
-    keys = 1530,
-    skin = 2440,
+    audio = 910,
+    controls = 1330,
+    keys = 1580,
+    skin = 2490,
 }
 
 function SETTINGS.open(cat)
@@ -389,32 +389,43 @@ function SETTINGS.mouseClick(rawX, rawY, k, isVirtual)
             return true
         end
 
-        -- Smooth Falling Toggle (gy ~ 145..185)
+        -- Screen Scrolling (HighCam) Toggle (gy ~ 145..185)
         if gy >= 145 and gy <= 185 and mx >= contentX + 10 and mx <= contentX + contentW - 10 then
+            SETTING.highCam = not (SETTING.highCam ~= false)
+            if saveSettings then saveSettings() end
+            if SFX and SFX.play then pcall(SFX.play, 'click') end
+            if MES and MES.new then
+                MES.new('check', "Screen scrolling: " .. (SETTING.highCam and "Enabled" or "Disabled"), 2)
+            end
+            return true
+        end
+
+        -- Smooth Falling Toggle (gy ~ 195..235)
+        if gy >= 195 and gy <= 235 and mx >= contentX + 10 and mx <= contentX + contentW - 10 then
             SETTING.smooth = not SETTING.smooth
             if saveSettings then saveSettings() end
             if SFX and SFX.play then pcall(SFX.play, 'click') end
             return true
         end
 
-        -- 3D Block Outlines (upEdge) (gy ~ 195..235)
-        if gy >= 195 and gy <= 235 and mx >= contentX + 10 and mx <= contentX + contentW - 10 then
+        -- 3D Block Outlines (upEdge) (gy ~ 245..285)
+        if gy >= 245 and gy <= 285 and mx >= contentX + 10 and mx <= contentX + contentW - 10 then
             SETTING.upEdge = not SETTING.upEdge
             if saveSettings then saveSettings() end
             if SFX and SFX.play then pcall(SFX.play, 'click') end
             return true
         end
 
-        -- Active Piece Glow (gy ~ 245..285)
-        if gy >= 245 and gy <= 285 and mx >= contentX + 10 and mx <= contentX + contentW - 10 then
+        -- Active Piece Glow (gy ~ 295..335)
+        if gy >= 295 and gy <= 335 and mx >= contentX + 10 and mx <= contentX + contentW - 10 then
             SETTING.block = not SETTING.block
             if saveSettings then saveSettings() end
             if SFX and SFX.play then pcall(SFX.play, 'click') end
             return true
         end
 
-        -- Performance Metrics (F7) Chips (gy ~ 305..345)
-        if gy >= 305 and gy <= 345 then
+        -- Performance Metrics (F7) Chips (gy ~ 355..395)
+        if gy >= 355 and gy <= 395 then
             local modes = { {label="Off", val=0}, {label="Compact (F7)", val=1}, {label="Detailed", val=2} }
             local chipW = (contentW - 16) / #modes
             for idx, m in ipairs(modes) do
@@ -427,8 +438,8 @@ function SETTINGS.mouseClick(rawX, rawY, k, isVirtual)
             end
         end
 
-        -- Block Saturation (gy ~ 365..405)
-        if gy >= 365 and gy <= 405 then
+        -- Block Saturation (gy ~ 415..455)
+        if gy >= 415 and gy <= 455 then
             local saturs = {'soft', 'normal', 'color', 'light', 'gray'}
             local chipW = (contentW - 16) / #saturs
             for idx, s in ipairs(saturs) do
@@ -982,20 +993,21 @@ function SETTINGS.draw()
     end
 
     drawToggleRow("Fullscreen Mode", "Switch between fullscreen/windowed", SETTING.fullscreen, y + 95)
-    drawToggleRow("Smooth Falling Piece", "Interpolate tetromino falling animation", SETTING.smooth, y + 145)
-    drawToggleRow("3D Block Shading (upEdge)", "Render enhanced 3D bevels", SETTING.upEdge, y + 195)
-    drawToggleRow("Active Piece Glow / Shadow", "Render glowing active piece", SETTING.block, y + 245)
+    drawToggleRow("Screen Scrolling (HighCam)", "Smoothly scroll board when near top-out", SETTING.highCam ~= false, y + 145)
+    drawToggleRow("Smooth Falling Piece", "Interpolate tetromino falling animation", SETTING.smooth, y + 195)
+    drawToggleRow("3D Block Shading (upEdge)", "Render enhanced 3D bevels", SETTING.upEdge, y + 245)
+    drawToggleRow("Active Piece Glow / Shadow", "Render glowing active piece", SETTING.block, y + 295)
 
     -- Performance Metrics Overlay
     FONT.set(12)
     GC.setColor(0.70, 0.74, 0.85, 0.85)
-    GC.print("Performance Metrics Overlay (F7):", contentX + 10, y + 296)
+    GC.print("Performance Metrics Overlay (F7):", contentX + 10, y + 346)
     local mModes = { {label="Off", val=0}, {label="Compact (Bottom-Left)", val=1}, {label="Detailed", val=2} }
     local mChipW = (contentW - 16) / #mModes
     for idx, m in ipairs(mModes) do
         local isSel = (METRICS and METRICS.mode == m.val)
         local cx = contentX + 8 + (idx - 1) * mChipW
-        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + mChipW - 4 and my >= y + 314 and my <= y + 342 and my >= viewY and my <= viewY + viewH)
+        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + mChipW - 4 and my >= y + 364 and my <= y + 392 and my >= viewY and my <= viewY + viewH)
         if isSel then
             GC.setColor(0.20, 0.65, 0.95, 0.95)
         elseif isHov then
@@ -1003,27 +1015,27 @@ function SETTINGS.draw()
         else
             GC.setColor(0.15, 0.17, 0.24, 0.85)
         end
-        GC.rectangle('fill', cx, y + 314, mChipW - 4, 28, 5)
+        GC.rectangle('fill', cx, y + 364, mChipW - 4, 28, 5)
         if isHov and not isSel then
             GC.setColor(0.35, 0.70, 1.0, 0.8)
             GC.setLineWidth(1)
-            GC.rectangle('line', cx, y + 314, mChipW - 4, 28, 5)
+            GC.rectangle('line', cx, y + 364, mChipW - 4, 28, 5)
         end
         GC.setColor(isSel and {1, 1, 1, 1} or (isHov and {0.95, 0.98, 1, 1} or {0.75, 0.80, 0.90, 0.85}))
         FONT.set(11)
-        GC.printf(m.label, cx, y + 321, mChipW - 4, 'center')
+        GC.printf(m.label, cx, y + 371, mChipW - 4, 'center')
     end
 
     -- Block Saturation
     FONT.set(12)
     GC.setColor(0.70, 0.74, 0.85, 0.85)
-    GC.print("Block Saturation Palette:", contentX + 10, y + 352)
+    GC.print("Block Saturation Palette:", contentX + 10, y + 402)
     local saturs = {'soft', 'normal', 'color', 'light', 'gray'}
     local sChipW = (contentW - 16) / #saturs
     for idx, s in ipairs(saturs) do
         local isSel = (SETTING.blockSatur == s)
         local cx = contentX + 8 + (idx - 1) * sChipW
-        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + sChipW - 4 and my >= y + 370 and my <= y + 398 and my >= viewY and my <= viewY + viewH)
+        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + sChipW - 4 and my >= y + 420 and my <= y + 448 and my >= viewY and my <= viewY + viewH)
         if isSel then
             GC.setColor(0.62, 0.44, 0.98, 0.95)
         elseif isHov then
@@ -1031,11 +1043,11 @@ function SETTINGS.draw()
         else
             GC.setColor(0.15, 0.17, 0.24, 0.85)
         end
-        GC.rectangle('fill', cx, y + 370, sChipW - 4, 28, 5)
+        GC.rectangle('fill', cx, y + 420, sChipW - 4, 28, 5)
         if isHov and not isSel then
             GC.setColor(0.35, 0.70, 1.0, 0.8)
             GC.setLineWidth(1)
-            GC.rectangle('line', cx, y + 370, sChipW - 4, 28, 5)
+            GC.rectangle('line', cx, y + 420, sChipW - 4, 28, 5)
         end
         GC.setColor(isSel and {1, 1, 1, 1} or (isHov and {0.95, 0.98, 1, 1} or {0.75, 0.80, 0.90, 0.85}))
         FONT.set(11)

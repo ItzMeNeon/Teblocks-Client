@@ -1083,6 +1083,47 @@ function draw.norm(P,repMode)
         local tm = STRING.time(P.stat.time)
         local pps = (P.stat.time and P.stat.time > 0) and (P.stat.piece / P.stat.time) or 0
 
+        -- Combo Counter (TETR.IO style on top of B2B counter)
+        if P.combo and P.combo > 1 then
+            local comboCount = P.combo - 1
+            local pulse = 0.85 + 0.15 * sin(TIME() * 8)
+            local r, g, b = 1.0, 0.45, 0.15
+            if comboCount >= 7 then
+                r, g, b = 1.0, 0.20, 0.50
+            elseif comboCount >= 4 then
+                r, g, b = 1.0, 0.70, 0.10
+            end
+
+            -- Ambient glow halo
+            gc_setColor(r, g, b, 0.18 * pulse)
+            gc_rectangle('fill', 9, 373, 106, 46, 8)
+
+            -- Obsidian glass fill
+            gc_setColor(0.04, 0.06, 0.14, 0.92)
+            gc_rectangle('fill', 12, 376, 100, 42, 6)
+
+            -- Glowing outer border
+            gc_setLineWidth(1.8)
+            gc_setColor(r * pulse, g * pulse, b * pulse, 0.88)
+            gc_rectangle('line', 12, 376, 100, 42, 6)
+
+            -- Top sheen
+            gc_setColor(1, 1, 1, 0.08)
+            gc_rectangle('fill', 14, 378, 96, 12, 4)
+
+            -- Header: COMBO
+            setFont(9)
+            gc_setColor(r, g, b, 0.95)
+            GC.mStr("🔥 COMBO", 62, 379)
+
+            -- Big Combo Text
+            setFont(16)
+            gc_setColor(0, 0, 0, 0.8)
+            GC.mStr(string.format("%d COMBO", comboCount), 63, 394)
+            gc_setColor(1, 1, 1, 1.0)
+            GC.mStr(string.format("%d COMBO", comboCount), 62, 393)
+        end
+
         -- B2B Counter (TETR.IO style on top of stats on the bottom left)
         if P.b2b and P.b2b >= 50 then
             local chain = max(1, P.b2bChain or 1)
