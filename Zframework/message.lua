@@ -1,6 +1,14 @@
 local ins, rem = table.insert, table.remove
 local max, min = math.max, math.min
 
+local function _getCoord(rawX, rawY)
+    if SCR and SCR.xOy_ul then
+        return SCR.xOy_ul:inverseTransformPoint(rawX, rawY)
+    end
+    local kScale = (SCR.k > 0 and SCR.k or 1)
+    return rawX / kScale, rawY / kScale
+end
+
 local mesList = {}
 local mesIcon = {
     check = GC.DO{40, 40,
@@ -152,7 +160,8 @@ function MES.new(icon, str, time)
         icon = mesIcon[icon]
     end
 
-    local line = string.format("[%s] %s: %s", os.date("%Y/%m/%d %H:%M:%S"), iconKey or "other", tostring(str))
+    local strText = tostring(str or "")
+    local line = string.format("[%s] %s: %s", os.date("%Y/%m/%d %H:%M:%S"), iconKey or "other", strText)
     print(line)
     if not TEMP_MODE then
         pcall(function()
@@ -160,21 +169,35 @@ function MES.new(icon, str, time)
         end)
     end
 
-    local screenW = SCR.w > 0 and (SCR.w / SCR.k) or 1280
+    local totalDuration = tonumber(time) or 4.5
+    local screenW = SCR.w > 0 and (SCR.w / (SCR.k > 0 and SCR.k or 1)) or 1280
+
+    -- Anti-spam: check if an identical active (non-yeeted) toast already exists
+    for i = 1, #mesList do
+        local m = mesList[i]
+        if not m.yeeted and m.str == strText then
+            -- Refresh its duration and bounce target instead of spamming duplicates
+            m.totalTime = totalDuration
+            m.time = totalDuration
+            m.startTime = 0.1
+            m.targetX = screenW - m.w - 20
+            return
+        end
+    end
+
     local cardW = 380
     local font = FONT.get(15)
-    local _, wrappedLines = font:getWrap(tostring(str), cardW - 55)
+    local _, wrappedLines = font:getWrap(strText, cardW - 55)
     local lineCount = max(1, #wrappedLines)
     local cardH = max(78, 38 + lineCount * 19 + 8)
 
-    local totalDuration = tonumber(time) or 4.5
     local timeStr = os.date("%H:%M")
 
     local toastItem = {
         key = iconKey,
         icon = icon,
         meta = meta,
-        str = tostring(str),
+        str = strText,
         w = cardW,
         h = cardH,
         timeStr = timeStr,
@@ -236,11 +259,9 @@ function MES.yeet(idx, flickVx, flickVy)
 end
 
 function MES.mouseDown(rawX, rawY, k)
-    local kScale = (SCR.k > 0 and SCR.k or 1)
-    local mx = rawX / kScale
-    local my = rawY / kScale
-    local screenW = SCR.w > 0 and (SCR.w / SCR.k) or 1280
-    local screenH = SCR.h > 0 and (SCR.h / SCR.k) or 720
+    local mx, my = _getCoord(rawX, rawY)
+    local screenW = SCR.w > 0 and (SCR.w / (SCR.k > 0 and SCR.k or 1)) or 1280
+    local screenH = SCR.h > 0 and (SCR.h / (SCR.k > 0 and SCR.k or 1)) or 720
 
     -- 1. Check Notification Tab click
     local tabW, tabH = 36, 85
@@ -290,21 +311,13 @@ function MES.mouseDown(rawX, rawY, k)
         end
     end
 
-    -- 3. Check Live Toast Toasts
+    -- 3. Check Live Toast Toasts: click anywhere on the toast instantly yeets it!
     for i = 1, #mesList do
         local m = mesList[i]
         if not m.yeeted then
             if mx >= m.x and mx <= m.x + m.w and my >= m.y and my <= m.y + m.h then
-                -- Check close button '✕'
-                if mx >= m.x + m.w - 32 and mx <= m.x + m.w - 8 and my >= m.y + 8 and my <= m.y + 32 then
-                    MES.yeet(i)
-                    return true
-                else
-                    -- Clicking toast body opens the Notification Sidebar
-                    MES.openSidebar()
-                    MES.yeet(i)
-                    return true
-                end
+                MES.yeet(i, 560, -90)
+                return true
             end
         end
     end
@@ -313,10 +326,8 @@ function MES.mouseDown(rawX, rawY, k)
 end
 
 function MES.mouseMove(rawX, rawY, dx, dy)
-    local kScale = (SCR.k > 0 and SCR.k or 1)
-    local mx = rawX / kScale
-    local my = rawY / kScale
-    local screenW = SCR.w > 0 and (SCR.w / SCR.k) or 1280
+    local mx, my = _getCoord(rawX, rawY)
+    local screenW = SCR.w > 0 and (SCR.w / (SCR.k > 0 and SCR.k or 1)) or 1280
 
     -- Check tab hover
     local tabW, tabH = 36, 85
@@ -332,6 +343,67 @@ function MES.mouseMove(rawX, rawY, dx, dy)
 end
 
 function MES.mouseUp(rawX, rawY, k)
+    return false
+end
+
+function MES.touchDown(id, rawX, rawY)
+    local mx, my = _getCoord(rawX, rawY)
+    local screenW = SCR.w > 0 and (SCR.w / (SCR.k > 0 and SCR.k or 1)) or 1280
+    local screenH = SCR.h > 0 and (SCR.h / (SCR.k > 0 and SCR.k or 1)) or 720
+
+    -- 1. Notification Tab touch
+    local tabW, tabH = 36, 85
+    local tabY = 360
+    local tabX = screenW - tabW - (MES.tabAnim * 10)
+    if mx >= tabX and mx <= screenW and my >= tabY and my <= tabY + tabH then
+        MES.toggleSidebar()
+        if SFX and SFX.play then pcall(SFX.play, 'click') end
+        return true
+    end
+
+    -- 2. Notification Sidebar touch
+    if MES.sidebarOpen and MES.sidebarX < screenW - 10 then
+        if mx >= MES.sidebarX and mx <= screenW and my >= 0 and my <= screenH then
+            if mx >= screenW - 38 and mx <= screenW - 10 and my >= 12 and my <= 40 then
+                MES.closeSidebar()
+                if SFX and SFX.play then pcall(SFX.play, 'click') end
+                return true
+            end
+            if mx >= screenW - 110 and mx <= screenW - 44 and my >= 14 and my <= 38 then
+                MES.clearHistory()
+                if SFX and SFX.play then pcall(SFX.play, 'click') end
+                return true
+            end
+            local curItemY = 65 - MES.sidebarScroll
+            for i = 1, #MES.history do
+                local item = MES.history[i]
+                if my >= curItemY and my <= curItemY + item.h then
+                    if mx >= screenW - 36 and mx <= screenW - 14 and my >= curItemY + 8 and my <= curItemY + 28 then
+                        rem(MES.history, i)
+                        if SFX and SFX.play then pcall(SFX.play, 'click') end
+                        return true
+                    end
+                end
+                curItemY = curItemY + item.h + 10
+            end
+            return true
+        else
+            MES.closeSidebar()
+            return true
+        end
+    end
+
+    -- 3. Live Toasts: tap to instantly yeet
+    for i = 1, #mesList do
+        local m = mesList[i]
+        if not m.yeeted then
+            if mx >= m.x and mx <= m.x + m.w and my >= m.y and my <= m.y + m.h then
+                MES.yeet(i, 560, -90)
+                return true
+            end
+        end
+    end
+
     return false
 end
 
@@ -413,11 +485,10 @@ function MES.update(dt)
 end
 
 function MES.draw()
-    local screenW = SCR.w > 0 and (SCR.w / SCR.k) or 1280
-    local screenH = SCR.h > 0 and (SCR.h / SCR.k) or 720
+    local screenW = SCR.w > 0 and (SCR.w / (SCR.k > 0 and SCR.k or 1)) or 1280
+    local screenH = SCR.h > 0 and (SCR.h / (SCR.k > 0 and SCR.k or 1)) or 720
     local kScale = (SCR.k > 0 and SCR.k or 1)
-    local mx = love.mouse.getX() / kScale
-    local my = love.mouse.getY() / kScale
+    local mx, my = _getCoord(love.mouse.getX(), love.mouse.getY())
 
     -- 1. Draw Notification Tab on right edge (when sidebar is closed)
     if not MES.sidebarOpen then

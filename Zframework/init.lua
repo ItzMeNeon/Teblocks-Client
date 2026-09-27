@@ -306,6 +306,7 @@ function love.touchpressed(id,x,y)
     if WAIT.state or SCN.swapping then return end
     local vx,vy=ITP(xOy,x,y)
     if SETTINGS and SETTINGS.isOpen and SETTINGS.touchDown and SETTINGS.touchDown(id,vx,vy) then return end
+    if MES and MES.touchDown and MES.touchDown(id,x,y) then return end
     if CHAT and CHAT.isOpen and CHAT.touchDown and CHAT.touchDown(id,vx,vy) then return end
     if not SCN.mainTouchID then
         SCN.mainTouchID=id

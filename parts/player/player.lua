@@ -2588,12 +2588,20 @@ local function _updateMisc(P,dt)
         end
     end
 
-    -- Move camera
-    if P.gameEnv.highCam then
+    -- Move camera (scroll board down when stack or active piece exceeds visible limit)
+    if P.gameEnv.highCam or SETTING.highCam ~= false then
         if not P.alive then
             y=0
         else
-            y=30*max(min(#P.field-18.5-P.fieldBeneath/30,P.ghoY-17),0)
+            local limit = P.gameEnv.fieldH or 20
+            local stackHigh = #P.field - 18.5 - P.fieldBeneath / 30
+            local pieceHigh = 0
+            if #P.field > 17 or (P.ghoY and P.ghoY > 17) then
+                local py = (P.cur and P.curY) or (P.ghoY or 0)
+                pieceHigh = py - 17
+            end
+            local targetY = max(stackHigh, pieceHigh, 0)
+            y = 30 * min(targetY, max(limit - 5, 15))
         end
         local f=P.fieldUp
         if f~=y then

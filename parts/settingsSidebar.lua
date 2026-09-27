@@ -115,9 +115,14 @@ function SETTINGS.scrollTo(cat)
 end
 
 local function _getCoord(rawX, rawY, isVirtual)
-    if isVirtual then return rawX, rawY end
-    if SCR and SCR.xOy then
-        return SCR.xOy:inverseTransformPoint(rawX, rawY)
+    if isVirtual then
+        if SCR and SCR.k and SCR.k > 0 then
+            return rawX + (SCR.x or 0) / SCR.k, rawY + (SCR.y or 0) / SCR.k
+        end
+        return rawX, rawY
+    end
+    if SCR and SCR.xOy_ul then
+        return SCR.xOy_ul:inverseTransformPoint(rawX, rawY)
     end
     local kScale = (SCR.k > 0 and SCR.k or 1)
     return rawX / kScale, rawY / kScale
@@ -790,26 +795,27 @@ function SETTINGS.draw()
 
     -- Helper: Draw Toggle Row
     local function drawToggleRow(label, desc, value, y)
-        local isHov = (mx >= SETTINGS.x + contentX and mx <= SETTINGS.x + contentX + contentW - 10 and my >= y - SETTINGS.scrollY + viewY and my <= y - SETTINGS.scrollY + viewY + 40)
-        GC.setColor(0.12, 0.13, 0.19, isHov and 0.85 or 0.5)
+        local isHov = (mx >= SETTINGS.x + contentX + 6 and mx <= SETTINGS.x + contentX + contentW - 6 and my >= y and my <= y + 40 and my >= viewY and my <= viewY + viewH)
+        GC.setColor(0.12, 0.16, 0.26, isHov and 0.95 or 0.60)
         GC.rectangle('fill', contentX + 6, y, contentW - 12, 40, 6)
-        GC.setColor(0.25, 0.28, 0.38, 0.4)
+        GC.setColor(isHov and {0.35, 0.70, 1.0, 0.85} or {0.20, 0.35, 0.60, 0.40})
+        GC.setLineWidth(1)
         GC.rectangle('line', contentX + 6, y, contentW - 12, 40, 6)
 
         FONT.set(14)
-        GC.setColor(1, 1, 1, 0.95)
+        GC.setColor(1, 1, 1, isHov and 1.0 or 0.90)
         GC.print(label, contentX + 16, y + 11)
 
         -- Switch pill on right
         local swX = contentX + contentW - 65
         local swY = y + 10
         if value then
-            GC.setColor(0.20, 0.75, 0.45, 0.95)
+            GC.setColor(0.20, 0.82, 0.45, 0.95)
             GC.rectangle('fill', swX, swY, 44, 20, 10)
             GC.setColor(1, 1, 1, 1)
             GC.circle('fill', swX + 32, swY + 10, 8)
         else
-            GC.setColor(0.25, 0.28, 0.38, 0.85)
+            GC.setColor(0.22, 0.26, 0.36, 0.85)
             GC.rectangle('fill', swX, swY, 44, 20, 10)
             GC.setColor(0.60, 0.65, 0.75, 0.9)
             GC.circle('fill', swX + 12, swY + 10, 8)
@@ -818,9 +824,11 @@ function SETTINGS.draw()
 
     -- Helper: Draw Slider Row
     local function drawSliderRow(label, valueStr, pct, y)
-        GC.setColor(0.12, 0.13, 0.19, 0.6)
+        local isHov = (mx >= SETTINGS.x + contentX + 6 and mx <= SETTINGS.x + contentX + contentW - 6 and my >= y and my <= y + 48 and my >= viewY and my <= viewY + viewH)
+        GC.setColor(0.12, 0.15, 0.24, isHov and 0.85 or 0.60)
         GC.rectangle('fill', contentX + 6, y, contentW - 12, 48, 6)
-        GC.setColor(0.25, 0.28, 0.38, 0.4)
+        GC.setColor(isHov and {0.35, 0.65, 0.95, 0.80} or {0.20, 0.35, 0.55, 0.40})
+        GC.setLineWidth(1)
         GC.rectangle('line', contentX + 6, y, contentW - 12, 48, 6)
 
         FONT.set(13)
@@ -834,32 +842,32 @@ function SETTINGS.draw()
         local trkX = contentX + 16
         local trkW = contentW - 32
         local trkY = y + 28
-        GC.setColor(0.20, 0.22, 0.30, 0.9)
+        GC.setColor(0.16, 0.20, 0.30, 0.9)
         GC.rectangle('fill', trkX, trkY, trkW, 8, 4)
 
         -- Slider Fill
-        GC.setColor(0.20, 0.65, 0.95, 0.95)
+        GC.setColor(0.25, 0.70, 1.0, 0.95)
         GC.rectangle('fill', trkX, trkY, trkW * pct, 8, 4)
 
         -- Handle
         GC.setColor(1, 1, 1, 1)
-        GC.circle('fill', trkX + trkW * pct, trkY + 4, 7)
+        GC.circle('fill', trkX + trkW * pct, trkY + 4, isHov and 8.5 or 7)
     end
 
     -- Helper: Draw Button Row
     local function drawButtonRow(label, subtext, y)
-        local isHov = (mx >= SETTINGS.x + contentX and mx <= SETTINGS.x + contentX + contentW - 10 and my >= y - SETTINGS.scrollY + viewY and my <= y - SETTINGS.scrollY + viewY + 40)
+        local isHov = (mx >= SETTINGS.x + contentX + 6 and mx <= SETTINGS.x + contentX + contentW - 6 and my >= y and my <= y + 40 and my >= viewY and my <= viewY + viewH)
         if isHov then
-            GC.setColor(0.20, 0.24, 0.35, 0.9)
+            GC.setColor(0.18, 0.25, 0.40, 0.95)
         else
-            GC.setColor(0.14, 0.16, 0.23, 0.8)
+            GC.setColor(0.12, 0.15, 0.23, 0.80)
         end
         GC.rectangle('fill', contentX + 6, y, contentW - 12, 40, 6)
-        GC.setColor(0.35, 0.40, 0.55, isHov and 0.8 or 0.5)
+        GC.setColor(isHov and {0.35, 0.70, 1.0, 0.90} or {0.25, 0.35, 0.55, 0.50})
         GC.rectangle('line', contentX + 6, y, contentW - 12, 40, 6)
 
         FONT.set(14)
-        GC.setColor(1, 1, 1, 0.95)
+        GC.setColor(1, 1, 1, isHov and 1.0 or 0.90)
         GC.print(label, contentX + 16, y + 11)
         FONT.set(14)
         GC.setColor(0.60, 0.65, 0.75, 0.8)
@@ -881,9 +889,21 @@ function SETTINGS.draw()
     for idx, rs in ipairs(rsList) do
         local isSel = (SETTING.RS == rs)
         local cx = contentX + 10 + (idx - 1) * rsChipW
-        GC.setColor(isSel and {0.98, 0.55, 0.20, 0.95} or {0.15, 0.17, 0.24, 0.85})
+        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + rsChipW - 4 and my >= y + 54 and my <= y + 82 and my >= viewY and my <= viewY + viewH)
+        if isSel then
+            GC.setColor(0.98, 0.55, 0.20, 0.95)
+        elseif isHov then
+            GC.setColor(0.24, 0.30, 0.45, 0.95)
+        else
+            GC.setColor(0.15, 0.17, 0.24, 0.85)
+        end
         GC.rectangle('fill', cx, y + 54, rsChipW - 4, 28, 5)
-        GC.setColor(isSel and {1, 1, 1, 1} or {0.70, 0.75, 0.85, 0.85})
+        if isHov and not isSel then
+            GC.setColor(0.35, 0.70, 1.0, 0.8)
+            GC.setLineWidth(1)
+            GC.rectangle('line', cx, y + 54, rsChipW - 4, 28, 5)
+        end
+        GC.setColor(isSel and {1, 1, 1, 1} or (isHov and {0.95, 0.98, 1, 1} or {0.70, 0.75, 0.85, 0.85}))
         FONT.set(11)
         GC.printf(rs, cx, y + 61, rsChipW - 4, 'center')
     end
@@ -901,9 +921,21 @@ function SETTINGS.draw()
     for idx, ch in ipairs(scaleChips) do
         local isSel = (math.abs(uiScaleVal - ch.val) < 0.04)
         local cx = contentX + 10 + (idx - 1) * 110
-        GC.setColor(isSel and {0.20, 0.65, 0.95, 0.95} or {0.16, 0.18, 0.26, 0.8})
+        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + 95 and my >= y + 300 and my <= y + 324 and my >= viewY and my <= viewY + viewH)
+        if isSel then
+            GC.setColor(0.20, 0.65, 0.95, 0.95)
+        elseif isHov then
+            GC.setColor(0.24, 0.30, 0.45, 0.95)
+        else
+            GC.setColor(0.16, 0.18, 0.26, 0.80)
+        end
         GC.rectangle('fill', cx, y + 300, 95, 24, 4)
-        GC.setColor(isSel and {1, 1, 1, 1} or {0.75, 0.80, 0.90, 0.85})
+        if isHov and not isSel then
+            GC.setColor(0.35, 0.70, 1.0, 0.8)
+            GC.setLineWidth(1)
+            GC.rectangle('line', cx, y + 300, 95, 24, 4)
+        end
+        GC.setColor(isSel and {1, 1, 1, 1} or (isHov and {0.95, 0.98, 1, 1} or {0.75, 0.80, 0.90, 0.85}))
         FONT.set(11)
         GC.printf(ch.label, cx, y + 304, 95, 'center')
     end
@@ -930,13 +962,21 @@ function SETTINGS.draw()
     for idx, opt in ipairs(fpsOptions) do
         local isSel = (curFPS == opt.val) or (opt.val == 'unlimited' and (curFPS == 'unlimited' or curFPS == 0 or curFPS == nil))
         local cx = contentX + 8 + (idx - 1) * fChipW
+        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + fChipW - 4 and my >= y + 54 and my <= y + 84 and my >= viewY and my <= viewY + viewH)
         if isSel then
             GC.setColor(0.18, 0.82, 0.45, 0.95)
+        elseif isHov then
+            GC.setColor(0.24, 0.32, 0.48, 0.95)
         else
             GC.setColor(0.15, 0.17, 0.24, 0.85)
         end
         GC.rectangle('fill', cx, y + 54, fChipW - 4, 30, 6)
-        GC.setColor(isSel and {1, 1, 1, 1} or {0.75, 0.80, 0.90, 0.85})
+        if isHov and not isSel then
+            GC.setColor(0.35, 0.70, 1.0, 0.8)
+            GC.setLineWidth(1)
+            GC.rectangle('line', cx, y + 54, fChipW - 4, 30, 6)
+        end
+        GC.setColor(isSel and {1, 1, 1, 1} or (isHov and {0.95, 0.98, 1, 1} or {0.75, 0.80, 0.90, 0.85}))
         FONT.set(11)
         GC.printf(opt.label, cx, y + 62, fChipW - 4, 'center')
     end
@@ -955,9 +995,21 @@ function SETTINGS.draw()
     for idx, m in ipairs(mModes) do
         local isSel = (METRICS and METRICS.mode == m.val)
         local cx = contentX + 8 + (idx - 1) * mChipW
-        GC.setColor(isSel and {0.20, 0.65, 0.95, 0.95} or {0.15, 0.17, 0.24, 0.85})
+        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + mChipW - 4 and my >= y + 314 and my <= y + 342 and my >= viewY and my <= viewY + viewH)
+        if isSel then
+            GC.setColor(0.20, 0.65, 0.95, 0.95)
+        elseif isHov then
+            GC.setColor(0.24, 0.30, 0.45, 0.95)
+        else
+            GC.setColor(0.15, 0.17, 0.24, 0.85)
+        end
         GC.rectangle('fill', cx, y + 314, mChipW - 4, 28, 5)
-        GC.setColor(isSel and {1, 1, 1, 1} or {0.75, 0.80, 0.90, 0.85})
+        if isHov and not isSel then
+            GC.setColor(0.35, 0.70, 1.0, 0.8)
+            GC.setLineWidth(1)
+            GC.rectangle('line', cx, y + 314, mChipW - 4, 28, 5)
+        end
+        GC.setColor(isSel and {1, 1, 1, 1} or (isHov and {0.95, 0.98, 1, 1} or {0.75, 0.80, 0.90, 0.85}))
         FONT.set(11)
         GC.printf(m.label, cx, y + 321, mChipW - 4, 'center')
     end
@@ -971,9 +1023,21 @@ function SETTINGS.draw()
     for idx, s in ipairs(saturs) do
         local isSel = (SETTING.blockSatur == s)
         local cx = contentX + 8 + (idx - 1) * sChipW
-        GC.setColor(isSel and {0.62, 0.44, 0.98, 0.95} or {0.15, 0.17, 0.24, 0.85})
+        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + sChipW - 4 and my >= y + 370 and my <= y + 398 and my >= viewY and my <= viewY + viewH)
+        if isSel then
+            GC.setColor(0.62, 0.44, 0.98, 0.95)
+        elseif isHov then
+            GC.setColor(0.24, 0.30, 0.45, 0.95)
+        else
+            GC.setColor(0.15, 0.17, 0.24, 0.85)
+        end
         GC.rectangle('fill', cx, y + 370, sChipW - 4, 28, 5)
-        GC.setColor(isSel and {1, 1, 1, 1} or {0.75, 0.80, 0.90, 0.85})
+        if isHov and not isSel then
+            GC.setColor(0.35, 0.70, 1.0, 0.8)
+            GC.setLineWidth(1)
+            GC.rectangle('line', cx, y + 370, sChipW - 4, 28, 5)
+        end
+        GC.setColor(isSel and {1, 1, 1, 1} or (isHov and {0.95, 0.98, 1, 1} or {0.75, 0.80, 0.90, 0.85}))
         FONT.set(11)
         GC.printf(s, cx, y + 377, sChipW - 4, 'center')
     end
@@ -1001,9 +1065,21 @@ function SETTINGS.draw()
     for idx, vname in ipairs(vocs) do
         local isSel = (SETTING.vocPack == vname)
         local cx = contentX + 8 + (idx - 1) * vocChipW
-        GC.setColor(isSel and {0.98, 0.55, 0.20, 0.95} or {0.15, 0.17, 0.24, 0.85})
+        local isHov = (mx >= SETTINGS.x + cx and mx <= SETTINGS.x + cx + vocChipW - 4 and my >= y + 233 and my <= y + 261 and my >= viewY and my <= viewY + viewH)
+        if isSel then
+            GC.setColor(0.98, 0.55, 0.20, 0.95)
+        elseif isHov then
+            GC.setColor(0.24, 0.30, 0.45, 0.95)
+        else
+            GC.setColor(0.15, 0.17, 0.24, 0.85)
+        end
         GC.rectangle('fill', cx, y + 233, vocChipW - 4, 28, 5)
-        GC.setColor(isSel and {1, 1, 1, 1} or {0.75, 0.80, 0.90, 0.85})
+        if isHov and not isSel then
+            GC.setColor(0.35, 0.70, 1.0, 0.8)
+            GC.setLineWidth(1)
+            GC.rectangle('line', cx, y + 233, vocChipW - 4, 28, 5)
+        end
+        GC.setColor(isSel and {1, 1, 1, 1} or (isHov and {0.95, 0.98, 1, 1} or {0.75, 0.80, 0.90, 0.85}))
         FONT.set(11)
         GC.printf(vname, cx, y + 240, vocChipW - 4, 'center')
     end
@@ -1036,7 +1112,7 @@ function SETTINGS.draw()
     for idx, act in ipairs(keyActions) do
         local rowY = y + 54 + (idx - 1) * 54
         local isListening = (SETTINGS.bindingAction == act.id)
-        local isHover = (mx >= contentX + 10 and mx <= contentX + contentW - 10 and my >= rowY and my <= rowY + 46)
+        local isHover = (mx >= SETTINGS.x + contentX + 10 and mx <= SETTINGS.x + contentX + contentW - 10 and my >= rowY and my <= rowY + 46 and my >= viewY and my <= viewY + viewH)
 
         -- Background card
         if isListening then

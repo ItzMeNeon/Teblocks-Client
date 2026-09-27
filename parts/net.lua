@@ -94,7 +94,7 @@ local availableErrorTextType={info=1,warn=1,error=1}
 local lastServerDownTime=0
 local function notifyServerDown()
     local t=love.timer.getTime()
-    if t-lastServerDownTime>4.5 then
+    if t-lastServerDownTime>30 then
         lastServerDownTime=t
         MES.new('info',text.serverDown or "Server is down",5)
     end
@@ -345,7 +345,10 @@ function NET.loginWithPassword(username,password)
                 MES.new('error', errMsg, 5)
             end
         else
-            MES.new('error', "Cannot connect to game server. Retrying in background...", 5)
+            if not NET._bgConnectNotified then
+                NET._bgConnectNotified = true
+                MES.new('error', "Cannot connect to game server. Retrying in background...", 5)
+            end
             NET.triggerReconnect()
         end
 
@@ -2034,7 +2037,10 @@ function NET.verifyVersion(cb)
             local mismatch = false
             if data.minRoomVersion and VERSION and VERSION.room and data.minRoomVersion ~= VERSION.room then
                 mismatch = true
-                MES.new('warn', ("Server room engine (%s) differs from client (%s)"):format(data.minRoomVersion, VERSION.room), 8)
+                if not NET._versionNotified then
+                    NET._versionNotified = true
+                    MES.new('warn', ("Server room engine (%s) differs from client (%s)"):format(data.minRoomVersion, VERSION.room), 8)
+                end
             end
 
             LOG("[VERSION] Verified with server: serverVer=" .. tostring(data.version) .. " clientVer=" .. tostring(VERSION and VERSION.string) .. (mismatch and " [MISMATCH]" or " [OK]"))

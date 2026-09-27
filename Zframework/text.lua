@@ -103,6 +103,8 @@ function TEXT.show(text,x,y,font,style,spd,stop)
     ins(texts,{
         c=0,                                                         -- Timer
         text=GC.newText(FONT.get(floor(font/5)*5 or 40),text),         -- String
+        rawStr=type(text)=='string' and text or tostring(text or ""),
+        style=style,
         x=x or 0,                                                    -- X
         y=y or 0,                                                    -- Y
         spd=(spd or 1),                                              -- Timing speed(1=last 1 sec)
@@ -114,6 +116,8 @@ function TEXT.getText(text,x,y,font,style,spd,stop)-- Another version of TEXT.sh
     return {
         c=0,
         text=GC.newText(FONT.get(floor(font/5)*5 or 40),text),
+        rawStr=type(text)=='string' and text or tostring(text or ""),
+        style=style,
         x=x or 0,
         y=y or 0,
         spd=(spd or 1),
@@ -150,6 +154,18 @@ local function _drawWhiteSparkle(x, y, size, a)
     GC.circle('fill', x, y, size * 0.28)
 end
 
+local function _isAttackText(t)
+    if not t or t.style == 'score' then return false end
+    local s = t.rawStr
+    if not s or #s == 0 or s:sub(1,1) == '+' then return false end
+    local l = s:lower()
+    return l:find('spin') or l:find('tetris') or l:find('quad') or
+           l:find('b2b') or l:find('b3b') or l:find('combo') or
+           l:find('clear') or l:find('perfect') or l:find('all') or
+           l:find('back') or l:find('double') or l:find('triple') or
+           l:find('single') or l:find('mini')
+end
+
 function TEXT.draw(list)
     if not list then
         list=texts
@@ -170,8 +186,8 @@ function TEXT.draw(list)
         setColor(1, 1, 1, alpha)
         t:draw()
 
-        -- Dynamic white sparkles (osu! / TETR.IO anime combat text sparkles)
-        if alpha > 0.1 and p < 0.85 and t.text then
+        -- Dynamic white sparkles (strictly for combat/attack texts: Tetris, T-Spin, B2B, All Clear, Combo)
+        if alpha > 0.1 and p < 0.85 and t.text and _isAttackText(t) then
             local tw = t.text:getWidth()
             local th = t.text:getHeight()
             local spLocs = {
